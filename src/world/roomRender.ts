@@ -1,7 +1,7 @@
 import type { ScenePalette } from "../art/palette";
 import { Bitmap, bayer } from "../engine/bitmap";
 import type { Hex } from "../engine/color";
-import { UNIT, type Vec2 } from "../engine/iso";
+import { gridToScreen, UNIT, type Vec2 } from "../engine/iso";
 import { IsoPainter, renderCropped } from "../engine/isoPaint";
 import type { FurnitureDef } from "./furniture";
 import { isFloor, roomAt, type WallSpan, type WorldLayout } from "./layout";
@@ -22,6 +22,14 @@ export function worldFrame(layout: WorldLayout): { w: number; h: number; origin:
     h: top + ((layout.w + layout.d) * UNIT) / 2 + SLAB + MARGIN,
     origin: { x: left, y: top },
   };
+}
+
+/** Vertical extent actually painted (back wall top to the lowest floor slab): the world box also spans the empty bottom of an L-shaped plan. */
+export function worldContentRows(layout: WorldLayout): { top: number; bottom: number } {
+  const { origin } = worldFrame(layout);
+  let bottom = 0;
+  for (const r of layout.rooms) bottom = Math.max(bottom, gridToScreen(r.x + r.w, r.y + r.d, origin).y + SLAB);
+  return { top: origin.y - WALL_H, bottom };
 }
 
 function hash(n: number): number {

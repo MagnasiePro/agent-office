@@ -10,7 +10,7 @@ import { Camera, viewportFor } from "./scene/camera";
 import { WorldView } from "./scene/compose";
 import { Office } from "./scene/office";
 import { OFFICE } from "./world/layout";
-import { renderBackground, VIEW_H, VIEW_W } from "./world/roomRender";
+import { renderBackground, VIEW_H, VIEW_W, worldContentRows } from "./world/roomRender";
 
 /**
  * Screensaver entry point: full-window, no cursor, no interaction.
@@ -23,7 +23,7 @@ const registry = createRegistry();
 const office = new Office(OFFICE, registry);
 const view = new WorldView(OFFICE, pal);
 const ambient = new Ambient(OFFICE, view.origin, pal);
-const camera = new Camera(view.width, view.height);
+const camera = new Camera(view.width, view.height, worldContentRows(OFFICE));
 
 const canvas = document.createElement("canvas");
 document.body.append(canvas);
