@@ -71,6 +71,6 @@ case "$MODE" in
     mkdir -p "$HOME/Applications"
     rm -rf "$DEST"; cp -R "$APP" "$DEST"
     open "$DEST"
-    echo "Installed $DEST (menu bar: lock icon, ⌃⌥⌘L to lock)"
+    echo "Installed $DEST (menu bar: lock icon, ⌃⌥⌘L to lock, change it from the menu)"
     ;;
 esac

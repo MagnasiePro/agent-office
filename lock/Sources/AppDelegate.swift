@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let server = SceneServer()
     private var statusItem: NSStatusItem!
     private var hotkey: Hotkey?
+    private var shortcut = Shortcut.standard
+    private var shortcutOK = false
     private var timer: Timer?
     private var sigterm: DispatchSourceSignal?
     private let defaults = UserDefaults.standard
@@ -27,6 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         hotkey = Hotkey { [weak self] in self?.lock.lock() }
+        shortcut = Shortcut.load(defaults)
+        shortcutOK = hotkey?.register(shortcut) ?? false
         // `pkill`/`kill` skips applicationWillTerminate: stop the bundled server anyway so it isn't orphaned.
         signal(SIGTERM, SIG_IGN)
         sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
@@ -99,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let alert = NSAlert()
         alert.messageText = "Set up Agent Office"
-        alert.informativeText = "Lock with ⌃⌥⌘L or from the lock icon in the menu bar; it also locks after \(defaults.integer(forKey: "idleMinutes")) min idle. Unlock with Touch ID or your login password."
+        alert.informativeText = "Lock with \(shortcut.display) (change it from the menu) or from the lock icon in the menu bar; it also locks after \(defaults.integer(forKey: "idleMinutes")) min idle. Unlock with Touch ID or your login password."
         alert.icon = NSApp.applicationIconImage
         alert.accessoryView = stack
         alert.addButton(withTitle: "Set Up")
@@ -130,10 +134,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let lockItem = NSMenuItem(title: "Lock Now", action: #selector(lockNow), keyEquivalent: "l")
-        lockItem.keyEquivalentModifierMask = [.control, .option, .command]
+        // Single characters show as a real key equivalent; other keys (arrows, F-keys…) go in the title.
+        let single = shortcut.key.count == 1
+        let lockItem = NSMenuItem(title: single || !shortcutOK ? "Lock Now" : "Lock Now   \(shortcut.display)", action: #selector(lockNow),
+                                  keyEquivalent: single && shortcutOK ? shortcut.key.lowercased() : "")
+        lockItem.keyEquivalentModifierMask = shortcut.eventModifiers
         lockItem.target = self
         menu.addItem(lockItem)
+        let change = NSMenuItem(title: shortcutOK ? "Change Shortcut…" : "Shortcut \(shortcut.display) Unavailable — Change…",
+                                action: #selector(changeShortcut), keyEquivalent: "")
+        change.target = self
+        menu.addItem(change)
         menu.addItem(.separator())
 
         let idleMenu = NSMenu()
@@ -171,6 +182,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func lockNow() { lock.lock() }
+
+    /// The current hotkey is released while recording, so pressing it again doesn't lock.
+    @objc private func changeShortcut() {
+        hotkey?.unregister()
+        let recorder = ShortcutRecorder(shortcut)
+        let alert = NSAlert()
+        alert.messageText = "Lock shortcut"
+        alert.informativeText = "Press the keys you want to use to lock the screen."
+        alert.icon = NSApp.applicationIconImage
+        alert.accessoryView = recorder
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Use \(Shortcut.standard.display)")
+        NSApp.activate(ignoringOtherApps: true)
+        recorder.start()
+        let reply = alert.runModal()
+        recorder.stop()
+        let chosen: Shortcut? = switch reply {
+        case .alertFirstButtonReturn: recorder.shortcut
+        case .alertThirdButtonReturn: .standard
+        default: nil
+        }
+        guard let chosen, let hotkey else {
+            shortcutOK = hotkey?.register(shortcut) ?? false
+            return
+        }
+        if hotkey.register(chosen) {
+            shortcut = chosen
+            shortcut.save(defaults)
+            shortcutOK = true
+        } else {
+            shortcutOK = hotkey.register(shortcut)
+            let fail = NSAlert()
+            fail.messageText = "\(chosen.display) is already taken"
+            fail.informativeText = "macOS or another app uses this shortcut. Pick another one."
+            fail.runModal()
+        }
+    }
 
     @objc private func setIdle(_ sender: NSMenuItem) { defaults.set(sender.tag, forKey: "idleMinutes") }
 

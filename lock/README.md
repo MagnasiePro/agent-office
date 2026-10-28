@@ -35,6 +35,7 @@ The app is signed ad hoc, not notarized, so the first time macOS blocks it. Reci
 | | |
 |---|---|
 | Lock now | **⌃⌥⌘L**, the menu bar item, or `open agent-office://lock` (Shortcuts, Raycast, Stream Deck…) |
+| Shortcut | menu → Change Shortcut…, then press the new combination (must include ⌃, ⌥ or ⌘). If macOS or another app already owns it, the menu says **Unavailable**. Keyboard remappers (Karabiner, a tiling window manager…) can swallow a combination before it gets here |
 | Lock when idle | menu → Lock When Idle (Never / 1–30 min, default 5). Skipped while an app holds a display-sleep assertion (video, call), like the real screen saver |
 | Unlock | touch the Touch ID sensor at any time, or move the mouse / press a key → password field at the bottom → Return. Esc hides it |
 | Scene server | started by the app if nothing answers on the scene URL (a dev server or the LaunchAgent wins), restarted if it dies, stopped on quit. Logs: `~/Library/Logs/AgentOffice-server.log` |
