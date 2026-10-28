@@ -186,7 +186,7 @@ The `.saver` only embeds a `WKWebView` showing `http://localhost:4317/`: UI chan
 
 There is also an app-extension variant (`saver/install.sh`, "Agent Office" with a space), closer to Apple's own savers but less tested.
 
-**MDM-managed Macs**: if a profile enforces the saver (`moduleName` in `/Library/Managed Preferences/com.apple.screensaver.plist`), macOS launches that one full screen regardless of the choice in Settings. Ask the administrator to remove this key.
+**MDM-managed Macs**: if a profile enforces the saver (`moduleName` in `/Library/Managed Preferences/com.apple.screensaver.plist`), macOS launches that one full screen regardless of the choice in Settings. Ask the administrator to remove this key, or use the lock screen app instead: `lock/build.sh` installs a menu bar app that runs the scene server itself, shows the scene full screen on ⌃⌥⌘L or after some idle time, and unlocks with Touch ID or your login password. `lock/build.sh package` makes a self-contained zip to share (see [`lock/README.md`](lock/README.md)).
 
 The page is already in screen saver mode: full screen, hidden cursor, no interaction, dark background, automatic integer scale, rendering stopped when the page is hidden.
 
