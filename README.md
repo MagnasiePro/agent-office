@@ -182,11 +182,13 @@ To check during integration:
 
 3. System Settings → Wallpaper → Screen Saver → **AgentOffice** (no space). After a rebuild: `killall legacyScreenSaver ScreenSaverEngine`.
 
+4. To lock the Mac too: System Settings → Lock Screen → **Require password after screen saver begins**. Leaving the saver then goes through the real macOS lock screen.
+
 The `.saver` only embeds a `WKWebView` showing `http://localhost:4317/`: UI changes (`pnpm build`) are picked up without rebuilding it. It disables WebKit's occlusion detection, otherwise the page is considered hidden and flickers / goes black, and drives frames by hand (see [`saver/README.md`](saver/README.md)).
 
 There is also an app-extension variant (`saver/install.sh`, "Agent Office" with a space), closer to Apple's own savers but less tested.
 
-**MDM-managed Macs**: if a profile enforces the saver (`moduleName` in `/Library/Managed Preferences/com.apple.screensaver.plist`), macOS launches that one full screen regardless of the choice in Settings. Ask the administrator to remove this key. If that isn't possible, the saver has a workaround option, the lock screen app (`saver/lock/build.sh`): a menu bar app that shows the scene full screen on ⌃⌥⌘L or after some idle time and unlocks with Touch ID or your login password (see [`saver/lock/README.md`](saver/lock/README.md)).
+**MDM-managed Macs**: if a profile enforces the saver (`moduleName` in `/Library/Managed Preferences/com.apple.screensaver.plist`), macOS launches that one full screen regardless of the choice in Settings. Ask the administrator to remove this key. There is also a workaround option, the lock screen app (`saver/lock/build.sh`): a menu bar app that shows the scene full screen on ⌃⌥⌘L or after some idle time and unlocks with Touch ID or your login password. **It is less secure than the macOS lock screen and not recommended on a company Mac**: it only draws over a session that stays unlocked. The screen saver above, with the macOS password requirement, is the real lock (see [`saver/lock/README.md`](saver/lock/README.md)).
 
 The page is already in screen saver mode: full screen, hidden cursor, no interaction, dark background, automatic integer scale, rendering stopped when the page is hidden.
 
