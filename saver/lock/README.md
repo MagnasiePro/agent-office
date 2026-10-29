@@ -1,6 +1,8 @@
-# Agent Office — screen saver replacement for managed Macs
+# Agent Office — lock screen option for managed Macs
 
-A menu bar app that shows the Agent Office scene full screen and only goes away with **Touch ID or your login password**. Use it when your organization's MDM profile forces the screen saver (`moduleName` enforced, see `saver/README.md` → Limitations), so a third-party saver never shows.
+An option of the screen saver, not a replacement: use the saver (`saver/legacy/build.sh`, see [`../README.md`](../README.md)) whenever you can. This option is a workaround for Macs whose MDM profile forces the screen saver (`moduleName` enforced, see `saver/README.md` → Limitations), so a third-party saver never shows.
+
+It is a menu bar app that shows the Agent Office scene full screen and only goes away with **Touch ID or your login password**.
 
 It's an ordinary app, so it needs no screen-saver setting and no admin rights. It contains everything: the scene server, the built scene and the Claude Code hooks installer. You don't need to run `pnpm dev` or the LaunchAgent.
 
@@ -9,26 +11,26 @@ It's an ordinary app, so it needs no screen-saver setting and no admin rights. I
 Requirements: Xcode command-line tools, Node.js and pnpm.
 
 ```bash
-lock/build.sh
+saver/lock/build.sh
 ```
 
-This builds `lock/build/Agent Office.app` (scene, server bundled into one file, icon rendered by `scripts/app-icon.ts`), copies it to `~/Applications` and launches it. On first launch a setup sheet offers to:
+This builds `saver/lock/build/Agent Office.app` (scene, server bundled into one file, icon rendered by `scripts/app-icon.ts`), copies it to `~/Applications` and launches it. On first launch a setup sheet offers to:
 
 - add the Claude Code hooks (`~/.claude/settings.json`, merged and backed up; same script as `scripts/claude-hooks.mjs`);
 - open at login;
 - grant Accessibility permission, for the shortcut blocker (optional, see Security).
 
-`lock/build.sh build` only builds; `lock/build.sh uninstall` quits and removes the app (hooks: `node scripts/claude-hooks.mjs uninstall`).
+`saver/lock/build.sh build` only builds; `saver/lock/build.sh uninstall` quits and removes the app (hooks: `node scripts/claude-hooks.mjs uninstall`).
 
 ## Share it with colleagues
 
 ```bash
-lock/build.sh package
+saver/lock/build.sh package
 ```
 
-This produces `lock/build/AgentOffice.zip` (~45 MB, Apple silicon), with Node.js embedded so recipients need nothing else installed. They unzip it, move **Agent Office** to Applications and open it; the setup sheet does the rest.
+This produces `saver/lock/build/AgentOffice.zip` (~45 MB, Apple silicon), with Node.js embedded so recipients need nothing else installed. They unzip it, move **Agent Office** to Applications and open it; the setup sheet does the rest.
 
-The app is signed ad hoc, not notarized, so the first time macOS blocks it. Recipients choose System Settings → Privacy & Security → **Open Anyway**, or run `xattr -dr com.apple.quarantine "/Applications/Agent Office.app"`. Some managed Macs refuse unnotarized apps entirely. With an Apple Developer account, `SIGN_ID="Developer ID Application: …" lock/build.sh package` signs with your certificate (notarization isn't scripted).
+The app is signed ad hoc, not notarized, so the first time macOS blocks it. Recipients choose System Settings → Privacy & Security → **Open Anyway**, or run `xattr -dr com.apple.quarantine "/Applications/Agent Office.app"`. Some managed Macs refuse unnotarized apps entirely. With an Apple Developer account, `SIGN_ID="Developer ID Application: …" saver/lock/build.sh package` signs with your certificate (notarization isn't scripted).
 
 ## Use
 
@@ -58,4 +60,4 @@ It is still a **privacy curtain, not the macOS login window**:
 - Holding the power button restarts the Mac, which lands on the real login screen (password / FileVault).
 - Siri, if enabled, can still act behind the overlay, and hot corners still trigger.
 - For a real lock, **⌃⌘Q** still works, and your organization's own lock policy applies on top.
-- Ad-hoc builds change signature on every rebuild, so macOS forgets the Accessibility permission. Re-enable it after `lock/build.sh` (System Settings → Privacy & Security → Accessibility).
+- Ad-hoc builds change signature on every rebuild, so macOS forgets the Accessibility permission. Re-enable it after `saver/lock/build.sh` (System Settings → Privacy & Security → Accessibility).

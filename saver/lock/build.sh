@@ -1,13 +1,13 @@
 #!/bin/bash
 # Builds Agent Office.app: menu bar lock screen + the scene server, the built scene and the Claude Code hooks installer.
-#   lock/build.sh            build, install to ~/Applications, launch (uses this Mac's Node.js)
-#   lock/build.sh build      build only → lock/build/Agent Office.app
-#   lock/build.sh package    self-contained build with Node.js embedded → lock/build/AgentOffice.zip, to share
-#   lock/build.sh uninstall  quit and remove the installed app
+#   saver/lock/build.sh           build, install to ~/Applications, launch (uses this Mac's Node.js)
+#   saver/lock/build.sh build     build only → saver/lock/build/Agent Office.app
+#   saver/lock/build.sh package   self-contained build with Node.js embedded → saver/lock/build/AgentOffice.zip, to share
+#   saver/lock/build.sh uninstall quit and remove the installed app
 # SIGN_ID="Developer ID Application: …" signs with your certificate instead of ad hoc.
 set -euo pipefail
 cd "$(dirname "$0")"
-ROOT="$(cd .. && pwd)"
+ROOT="$(cd ../.. && pwd)"
 MODE="${1:-install}"
 APP="build/Agent Office.app"
 DEST="$HOME/Applications/Agent Office.app"
@@ -63,7 +63,7 @@ case "$MODE" in
   package)
     rm -f build/AgentOffice.zip
     ditto -c -k --keepParent "$APP" build/AgentOffice.zip
-    echo "Packaged lock/build/AgentOffice.zip ($(du -h build/AgentOffice.zip | cut -f1)) — Apple silicon, $("$NODE" --version) embedded"
+    echo "Packaged saver/lock/build/AgentOffice.zip ($(du -h build/AgentOffice.zip | cut -f1)) — Apple silicon, $("$NODE" --version) embedded"
     ;;
   *)
     pkill -x AgentOffice 2>/dev/null || true

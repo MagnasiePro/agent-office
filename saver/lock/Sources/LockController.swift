@@ -26,7 +26,7 @@ final class LockController {
     func lock() {
         guard !isLocked else { return }
         isLocked = true
-        NSApp.setActivationPolicy(.regular)
+        // Stay an accessory app: a regular app's windows can't cover a display where another app is in native full screen.
         NSApp.presentationOptions = Self.kiosk
         buildWindows()
         NSApp.activate(ignoringOtherApps: true)
@@ -67,7 +67,6 @@ final class LockController {
         windows.forEach { $0.close() }
         windows = []
         NSApp.presentationOptions = []
-        NSApp.setActivationPolicy(.accessory)
         NSApp.hide(nil)
     }
 

@@ -34,5 +34,5 @@ Inside a screen saver, WebKit thinks the window is hidden: `document.hidden` sta
 ## Limitations
 
 - **Private API**: Apple has not documented this extension point for third parties; a macOS update may break it. Distribution outside the App Store only; for other Macs, sign with a Developer ID and notarize.
-- **Managed Macs (MDM)**: a configuration profile that enforces `com.apple.screensaver` → `moduleName` (e.g. `Hello`) overrides the choice made in Settings: the preview shows Agent Office but full screen launches the enforced saver. Check with `plutil -p "/Library/Managed Preferences/com.apple.screensaver.plist"`. Only the MDM administrator can lift this constraint.
+- **Managed Macs (MDM)**: a configuration profile that enforces `com.apple.screensaver` → `moduleName` (e.g. `Hello`) overrides the choice made in Settings: the preview shows Agent Office but full screen launches the enforced saver. Check with `plutil -p "/Library/Managed Preferences/com.apple.screensaver.plist"`. Only the MDM administrator can lift this constraint; until then, the lock screen option ([`lock/`](lock/README.md)) shows the scene from a menu bar app instead.
 - Diagnostics: `log stream --predicate 'subsystem BEGINSWITH "dev.agent-office"'` shows the extension and page loading.

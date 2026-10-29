@@ -208,8 +208,9 @@ final class LockView: NSView, WKNavigationDelegate, NSTextFieldDelegate {
             panel.isHidden = false
             needsLayout = true
             NSAnimationContext.runAnimationGroup { $0.duration = 0.2; panel.animator().alphaValue = 1 }
-            controller?.armTouchID()
         }
+        // No-op while armed; re-arms after a cancelled prompt even if the panel stayed up.
+        controller?.armTouchID()
         if window?.firstResponder !== field.currentEditor() {
             window?.makeKey()
             window?.makeFirstResponder(field)
