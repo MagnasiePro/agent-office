@@ -1,5 +1,10 @@
 # Agent Office — lock screen option for managed Macs
 
+> [!WARNING]
+> **Less secure than the macOS lock screen. Not recommended on a company Mac.**
+> This app is an ordinary process drawing a window over your session: the session itself stays unlocked behind it. Any process running as you can close it, a crash reveals the desktop, password guesses are not limited the way macOS limits them, and it may not satisfy your organization's lock policy (see [Security](#security)).
+> Prefer the screen saver (`saver/legacy/build.sh`) with **System Settings → Lock Screen → Require password after screen saver begins**: that lock is the real macOS one. Never use this app in place of it.
+
 An option of the screen saver, not a replacement: use the saver (`saver/legacy/build.sh`, see [`../README.md`](../README.md)) whenever you can. This option is a workaround for Macs whose MDM profile forces the screen saver (`moduleName` enforced, see `saver/README.md` → Limitations), so a third-party saver never shows.
 
 It is a menu bar app that shows the Agent Office scene full screen and only goes away with **Touch ID or your login password**.
@@ -54,9 +59,12 @@ While locked:
 - **Shortcut blocker** (needs Accessibility; menu → Block System Shortcuts While Locked): a `CGEventTap` swallows ⌘/⌃ shortcuts, ⌥Space, function and media keys, the Globe key, scroll and trackpad gestures. Plain typing still reaches the password field. Without it, other apps' global hotkeys (Spotlight, Raycast, Shortcuts…) still fire behind the overlay. They can't type into the app they open, but a hotkey bound to a script would run.
 - **Unlock**: Touch ID (a biometrics-only `LAContext` kept armed), or your login password checked through Open Directory (`ODRecord.verifyPassword`, which also works for directory/mobile accounts). After 3 failures there is a 30 s cooldown. There is no unlock URL or command.
 
-It is still a **privacy curtain, not the macOS login window**:
+It is still a **privacy curtain, not the macOS login window**, and it is weaker than the macOS lock screen:
 
-- Anyone who can already run commands as you (SSH, Screen Sharing, a remote session) can `pkill` it.
+- The macOS session is not locked: apps keep running, and the keychain, recent `sudo` credentials and open sessions stay usable by anything already running.
+- Anyone or anything that can run commands as you (SSH, Screen Sharing, a remote session, a compromised app or script) can `pkill` it. If the app crashes, the desktop is shown.
+- Password guessing is only slowed down (3 attempts, then 30 s), with no escalating delay or lockout like the macOS login window.
+- The shortcut blocker is best effort and not verified against every system hotkey (the secure password field may change what it sees).
 - Holding the power button restarts the Mac, which lands on the real login screen (password / FileVault).
 - Siri, if enabled, can still act behind the overlay, and hot corners still trigger.
 - For a real lock, **⌃⌘Q** still works, and your organization's own lock policy applies on top.
