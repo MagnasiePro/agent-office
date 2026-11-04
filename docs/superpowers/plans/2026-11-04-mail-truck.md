@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A mail truck and a mailbox errand show every real git push and pull, detected by an additive global git hook.
+**Goal:** A mail truck (no road, one mailbox moved to the open-space edge) and a mailbox errand show every real git push and pull, detected by an additive global git hook.
 
-**Architecture:** A POSIX-sh git hook, registered through git ≥ 2.54 config-based hooks, posts `{repo, direction}` to `POST /git`. `HookAdapter` maps the repo to the session agent that last used a tool there and emits a transient `agent_mail` event. `Office` runs a truck state machine and short mailbox errands. `Ambient`-style painters draw the road (static layer), truck, flag and envelope (overlay).
+**Architecture:** A POSIX-sh git hook, registered through git ≥ 2.54 config-based hooks, posts `{repo, direction}` to `POST /git`. `HookAdapter` maps the repo to the session agent that last used a tool there and emits a transient `agent_mail` event. `Office` runs a truck state machine and short mailbox errands. `Ambient`-style painters draw the truck, flag and envelope (overlay); no road.
 
 **Tech Stack:** TypeScript, zod 4, POSIX sh + curl, Node `child_process` for tests, Canvas 2D pixel overlay, Vitest, Playwright.
 
@@ -96,14 +96,14 @@
 ### Task 3: Office — mailbox, truck, errands
 
 **Files:**
-- Modify: `src/world/layout.ts` (mailbox placement, road description), `src/world/furniture.ts` (`MAILBOX` 1 frame, flag down), `src/engine/agent.ts`, `src/scene/office.ts`
+- Modify: `src/world/layout.ts` (mailbox placement, `truckLane`), `src/world/furniture.ts` (`MAILBOX` 1 frame, flag down), `src/engine/agent.ts`, `src/scene/office.ts`
 - Create: `src/scene/mail.ts` (truck + mailbox state machine, pure)
 - Test: `tests/unit/mail.test.ts`, `tests/unit/office.test.ts`
 
 **Interfaces:**
 - Consumes: `AgentMailEvent` (Task 1).
 - Produces:
-  - `WorldLayout.road: { y0: number; y1: number; x0: number; x1: number; stop: number }` — grid strip and the truck's stop `x`. Values: `{ y0: 9.6, y1: 11.4, x0: 10, x1: layout.w + 4, stop: 11.5 }`. `MAILBOX` placed at `(11, 8)`; station `mailbox` slot `{ x: 11, y: 7, dir: "SE" }`; old placement `(0, 7)` and its slot removed. Check pathfinding still reaches every station (existing test "never steps through a partition" + a new reachability assertion for the mailbox slot).
+  - `WorldLayout.truckLane: { y: number; from: number; stop: number }` — the grid line the truck drives along (no road is drawn), where it appears and where it stops. Values: `{ y: 10.5, from: layout.w + 5, stop: 11.9 }`. The single `MAILBOX` moves from `(0, 7)` to `(11, 8)`; station `mailbox` slot `{ x: 11, y: 7, dir: "SE" }`; nothing remains at `(0, 7)`. Check pathfinding still reaches every station (existing test "never steps through a partition" + a new reachability assertion for the mailbox slot).
   - `src/scene/mail.ts`: `class MailService` with `truck: { x: number; facing: "in" | "out"; state: "away" | "arriving" | "stopped" | "leaving" }`, `box: { outgoing: number; incoming: string[] /* addressee ids */ }`, `get flagUp(): boolean` (`outgoing > 0 || incoming.length > 0`), `requestPickup(): void`, `requestDelivery(agentId: string): void`, `takeLetter(agentId: string): boolean`, `post(): void`, `update(dt: number): void`, `onDelivered?: (agentId: string) => void`. Truck speed ≈ 3 tiles/s, stop 1.2 s; it serves every pending pickup/delivery in one trip and starts another trip if more arrived after it left.
   - `Agent.carrying: "letter" | null`.
   - `Office`: owns a `MailService` (`office.mail`). `agent_mail push` → errand: `carrying = "letter"`, walk to the mailbox slot, on arrival wait 0.6 s, `mail.post()`, `carrying = null`, `mail.requestPickup()`, errand ends. `agent_mail pull` → `mail.requestDelivery(id)`; `onDelivered(id)` → errand: walk to the slot, `takeLetter(id)`, `carrying = "letter"` for 3 s (clear on the next event or after 3 s), errand ends. During an errand, other events for that agent go to `m.pending` and are replayed in order when it ends (reuse the spawning replay). Despawn cancels the errand; an undelivered letter for a gone agent is dropped from `incoming` (flag goes down when empty). Errand state: `Meta.errand: "post" | "fetch" | null`; agent state while walking/standing there: `walking` then `working` with `station = "mailbox"`.
@@ -117,24 +117,24 @@
 
 ---
 
-### Task 4: Road, truck, flag and envelope art
+### Task 4: Truck, flag and envelope art (no road)
 
 **Files:**
-- Modify: `src/world/roomRender.ts` (road in `renderStaticLayer`), `src/scene/ambient.ts` (painters), `src/main.ts` (wiring)
+- Modify: `src/scene/ambient.ts` (painters), `src/main.ts` (wiring)
 - Create: `src/scene/truck.ts` (truck sprite bitmaps, cached)
 - Test: `tests/visual/visual.spec.ts`
 
 **Interfaces:**
-- Consumes: `WorldLayout.road`, `office.mail` (`truck`, `flagUp`), `Agent.carrying` (Task 3).
+- Consumes: `WorldLayout.truckLane`, `office.mail` (`truck`, `flagUp`), `Agent.carrying` (Task 3).
 - Produces:
-  - Road in the static layer: asphalt strip over `road` (dark palette inks with `bayer` texture), a dashed cream centre line, a thin kerb along the floor-side edge; drawn so the floor slab front faces stay visible above it.
-  - `truckSprite(facing: "in" | "out", frame: number): Bitmap` in `src/scene/truck.ts`: small iso van (≈ 1.6 × 0.9 tiles footprint), mail-red body (`pal.red` / `pal.coral0` shading), cream windscreen, ink wheels with a 2-frame wheel animation while moving, a tiny butter envelope logo on the side; `"out"` may be the mirror of `"in"`.
-  - `Ambient.drawMail(ctx, office: Office, t: number): void` — overlay, called after `drawStationFx` and before `drawSpeech`: truck at `gridToScreen(truck.x, (road.y0 + road.y1) / 2)` when not `away`; mailbox flag up (butter flag on a wood post, same look as the old frame 1) at the mailbox's screen position when `flagUp`; for each agent with `carrying === "letter"` a 4×3 cream envelope with ink outline at the hand (follow the mug placement from the coffee effect).
+  - **No road and no shadow** under the truck (it drives through the void).
+  - `truckSprite(facing: "in" | "out", frame: number): Bitmap` in `src/scene/truck.ts`, matching the approved preview (`.superpowers/brainstorm/*/content/mail-truck-v3.html`, function `truck`): iso van ≈ 38 × 18 world units (2.4 × 1.1 tiles), cargo box 22 high, cab 12 long × 15 high; ink outline on every visible edge; `red` sides, `coral1` top, `coral0` shaded face; white 2-px stripe on the side; `sky2` cab window and windscreen with **two** butter headlights on the front face (one at each side); rear-door line and red tail lights when the back faces the viewer; ink wheels with a 2-frame turn while moving. **No envelope/letter on the truck.** Draw the further-back block first (`"in"`: cab, then cargo; `"out"`: cargo, then cab).
+  - `Ambient.drawMail(ctx, office: Office, t: number): void` — overlay, called after `drawStationFx` and before `drawSpeech`: truck at `gridToScreen(truck.x, truckLane.y)` when not `away`; mailbox flag up (butter flag on a wood post, same look as the old frame 1) at the mailbox's screen position when `flagUp`; for each agent with `carrying === "letter"` a 4×3 cream envelope with ink outline at the hand (follow the mug placement from the coffee effect).
 - [ ] **Step 1: Add visual test** `"the mail truck drives up to the mailbox"`: via `__agentOffice.apply`, spawn `a`, `agent_tool a Edit`, wait until working, `agent_mail a pull`; poll `office.mail.truck.state` until `"stopped"`; screenshot; assert ≥ 20 `SCENE_WARM.red` pixels inside the box around the truck's screen position (compute it in-page from `view.origin` + `gridToScreen`) and that the flag region shows `SCENE_WARM.butter`; existing palette-only test still passes.
 - [ ] **Step 2: Run** the test on a temporary Playwright config (spare port) — Expected: FAIL.
-- [ ] **Step 3: Implement** the road, sprite and painters; tune by full-frame 1920×1080 screenshots (truck arriving, stopped, agent carrying a letter), looked at with the Read tool.
+- [ ] **Step 3: Implement** the sprite and painters; tune by full-frame 1920×1080 screenshots (truck arriving, stopped, agent carrying a letter), looked at with the Read tool.
 - [ ] **Step 4: Run** `pnpm test && pnpm test:visual` (temp config) and check `?mock=stress&n=30` still runs at 30 fps — Expected: PASS.
-- [ ] **Step 5: Commit** — `feat(scene): road, mail truck, mailbox flag and carried letters`
+- [ ] **Step 5: Commit** — `feat(scene): mail truck, mailbox flag and carried letters`
 
 ---
 

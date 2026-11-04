@@ -74,10 +74,10 @@ Installer (same conventions as `claude-hooks.mjs` / `statusline.mjs`): `install 
 
 ### 4. Office layout and art (owner: "adapt the office if needed")
 
-- A road in the void in front of the open space and lab: grid strip `y ∈ [9.6, 11.4]`, from `x = 10` to past the right edge of the world, drawn in the static layer (asphalt in palette inks, dashed centre line). Not walkable, not a room.
-- The mailbox moves to the front edge of the open space, `(11, 8)`, facing the road; its station slot `(11, 7)` faces `SE`. The old mailbox spot `(0, 7)` is freed.
+- No road (owner): the truck drives through the void along the grid line `y = 10.5`, from past the right edge of the world, and stops in front of the mailbox. No shadow on the void.
+- One mailbox only (owner): the existing mailbox moves from `(0, 7)` to the front edge of the open space, `(11, 8)`; its station slot `(11, 7)` faces `SE`. Nothing stays at `(0, 7)`.
 - The flag is driven by state (overlay), not by time: `MAILBOX` becomes a 1-frame sprite with the flag down; the overlay draws it up when the mailbox holds mail.
-- Truck: small pixel-art van (palette colours, mail-red body, cream window, dark wheels) drawn in two facings (arriving toward the mailbox, leaving away), driving along the road, stopping in front of the mailbox. It is the front-most object there, drawn in the overlay before the beacons.
+- Truck (approved preview v3): pixel-art van ≈ 2.4 × 1.1 tiles, ink outline on every edge like the furniture, mail-red body (`red` sides, `coral1` top, `coral0` shaded face), white side stripe, `sky2` cab window, windscreen with two headlights, rear doors, wheels turning while it moves. **No envelope or letter drawn on the outside of the truck** (owner). Two facings: arriving (cab towards the mailbox, up-left) and leaving (cab towards the viewer, windscreen visible); the part of the van further back is drawn first so the cab never overlaps the cargo box wrongly. It is the front-most object there, drawn in the overlay before the beacons.
 - Carried letter: a 4×3 cream/ink envelope at the agent's hand (overlay), like the coffee mug.
 
 ### 5. Demo, mock, docs
@@ -91,5 +91,5 @@ Same as the previous feature: pixel art with `SCENE_WARM` colours only, no new d
 
 ## Left to the builder
 
-- Exact truck, road, envelope pixels and timings.
-- Exact stop position of the truck along the road in front of the mailbox.
+- Exact truck and envelope pixels and timings.
+- Exact stop position of the truck along its lane in front of the mailbox.
