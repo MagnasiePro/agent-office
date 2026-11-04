@@ -3,7 +3,7 @@
 //   node scripts/update.mjs apply [--yes]  fast-forward this checkout to the latest release, after confirmation
 // Also imported by the server for its background check (see docs/configuration.md#updates).
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -29,7 +29,8 @@ export function compareVersions(/** @type {string} */ a, /** @type {string} */ b
 /** @param {unknown} body @returns {{ latest: string, url: string } | null} */
 export function parseRelease(body) {
   const b = /** @type {{ tag_name?: unknown, html_url?: unknown } | null} */ (body);
-  if (typeof b?.tag_name !== "string" || typeof b.html_url !== "string") return null;
+  // Only vX.Y.Z: apply merges the tag `v<latest>`, so anything else would be offered but impossible to apply.
+  if (typeof b?.tag_name !== "string" || !/^v\d+\.\d+\.\d+$/.test(b.tag_name) || typeof b.html_url !== "string") return null;
   return { latest: b.tag_name.replace(/^v/, ""), url: b.html_url };
 }
 
@@ -68,6 +69,15 @@ export function preflight(git, tag) {
 /** WorkingDirectory of the LaunchAgent plist, or null. @param {string} plist */
 export function agentRoot(plist) {
   return /<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/.exec(plist)?.[1] ?? null;
+}
+
+/** Same folder once symlinks are resolved (launchagent.sh records the logical `pwd`). @param {string} a @param {string} b */
+export function samePath(a, b) {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
+  }
 }
 
 /** Whether the native screen saver sources changed between two commits. @param {Git} git @param {string} from @param {string} tag */
@@ -117,7 +127,7 @@ async function apply(info, yes) {
   if (saverChanged(git, from, tag)) console.log("The screen saver changed in this release: rebuild it with saver/legacy/build.sh");
   const plist = join(homedir(), "Library", "LaunchAgents", "com.agent-office.server.plist");
   const root = existsSync(plist) ? agentRoot(readFileSync(plist, "utf8")) : null;
-  if (root === ROOT) step(join(ROOT, "scripts", "launchagent.sh"), ["restart"]);
+  if (root && samePath(root, ROOT)) step(join(ROOT, "scripts", "launchagent.sh"), ["restart"]);
   else if (root) console.log(`The background server runs from another checkout (${root}); it was not restarted.`);
   else console.log("Restart your server to use the new version.");
 }

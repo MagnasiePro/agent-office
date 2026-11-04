@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { agentRoot, checkUpdate, compareVersions, fetchLatest, parseRelease, preflight, saverChanged } from "../../scripts/update.mjs";
+import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { agentRoot, checkUpdate, compareVersions, fetchLatest, parseRelease, preflight, samePath, saverChanged } from "../../scripts/update.mjs";
 
 const fakeOk = (tag: string) => (async () => ({ ok: true, status: 200, json: async () => ({ tag_name: tag, html_url: "https://x" }) })) as unknown as typeof fetch;
 const fakeStatus = (status: number) => (async () => ({ ok: false, status, json: async () => ({}) })) as unknown as typeof fetch;
@@ -26,6 +29,9 @@ describe("parseRelease", () => {
   it("returns null on unexpected bodies", () => {
     expect(parseRelease({})).toBeNull();
     expect(parseRelease(null)).toBeNull();
+  });
+  it("only accepts vX.Y.Z tags, the ones apply can merge", () => {
+    expect(parseRelease({ tag_name: "0.3.0", html_url: "https://x" })).toBeNull();
   });
 });
 
@@ -91,5 +97,16 @@ describe("saverChanged", () => {
   it("is true only when the release touches saver/", () => {
     expect(saverChanged(fakeGit({ "diff --name-only abc v0.3.0 -- saver/": { out: "saver/lock/x.swift" } }), "abc", "v0.3.0")).toBe(true);
     expect(saverChanged(fakeGit({}), "abc", "v0.3.0")).toBe(false);
+  });
+});
+
+describe("samePath", () => {
+  it("sees a folder and a symlink to it as the same checkout", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ao-"));
+    mkdirSync(join(dir, "real"));
+    symlinkSync(join(dir, "real"), join(dir, "link"));
+    expect(samePath(join(dir, "link"), join(dir, "real"))).toBe(true);
+    expect(samePath(join(dir, "real"), dir)).toBe(false);
+    expect(samePath(join(dir, "missing"), dir)).toBe(false);
   });
 });
