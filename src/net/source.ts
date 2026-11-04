@@ -1,9 +1,10 @@
-import { parseServerMessage, type AgentEvent, type Snapshot } from "../../shared/events";
+import { parseServerMessage, type AgentEvent, type Snapshot, type Usage } from "../../shared/events";
 import { play, randomScenario, scriptedScenario, stressScenario } from "../../shared/scenario";
 
 export interface EventSink {
   event(e: AgentEvent): void;
   snapshot(s: Snapshot): void;
+  usage?(u: Usage): void;
   status?(s: "connecting" | "open" | "closed"): void;
 }
 
@@ -30,8 +31,11 @@ export function connectWs(url: string, sink: EventSink): () => void {
       }
       const msg = parseServerMessage(raw);
       if (!msg) return console.warn("[agent-office] ignored invalid message", raw);
-      if (msg.type === "snapshot") sink.snapshot(msg);
-      else if (msg.type !== "usage") sink.event(msg); // usage is wired in a later task
+      if (msg.type === "snapshot") {
+        sink.snapshot(msg);
+        if (msg.usage) sink.usage?.(msg.usage);
+      } else if (msg.type === "usage") sink.usage?.(msg);
+      else sink.event(msg);
     };
     ws.onclose = () => {
       sink.status?.("closed");
@@ -57,6 +61,8 @@ export function connectWs(url: string, sink: EventSink): () => void {
 export function startMock(mode: string, sink: EventSink, params: URLSearchParams): () => void {
   const speed = Number(params.get("speed") ?? 1);
   const emit = (e: AgentEvent) => sink.event(e);
+  const now = Math.floor(Date.now() / 1000);
+  sink.usage?.({ type: "usage", fiveHour: { usedPercentage: 62, resetsAt: now + 2 * 3600 }, sevenDay: { usedPercentage: 34, resetsAt: now + 3 * 86400 } });
   if (mode === "stress") return play(stressScenario(Number(params.get("n") ?? 30)), emit, { speed });
   if (mode === "random") return play(randomScenario(Math.random, ["claude", "claude", "robot"]), emit, { speed });
   let stopRandom: (() => void) | undefined;

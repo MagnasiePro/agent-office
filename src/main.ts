@@ -1,4 +1,4 @@
-import type { AgentEvent } from "../shared/events";
+import type { AgentEvent, Usage } from "../shared/events";
 import { SCENE_WARM } from "./art/palette";
 import { createRegistry } from "./characters";
 import { toCanvas } from "./engine/canvas";
@@ -50,9 +50,11 @@ const freezeAt = params.has("freeze") ? Number(params.get("freeze")) : Infinity;
 let simTime = 0;
 const frozen = () => simTime >= freezeAt;
 
+let usage: Usage | null = null;
 const sink: EventSink = {
   event: (e) => frozen() || office.apply(e),
   snapshot: (s) => frozen() || office.applySnapshot(s),
+  usage: (u) => frozen() || (usage = u),
 };
 const mock = params.get("mock");
 if (mock) startMock(mock === "1" ? "scripted" : mock, sink, params);
@@ -94,4 +96,4 @@ const loop = startLoop((rawDt) => {
 });
 
 // Hook for QA tooling (Playwright): live stats, viewport and the simulation.
-(window as unknown as { __agentOffice: unknown }).__agentOffice = { office, stats: loop.stats, apply: (e: AgentEvent) => office.apply(e), viewport: () => vp, camera };
+(window as unknown as { __agentOffice: unknown }).__agentOffice = { office, stats: loop.stats, apply: (e: AgentEvent) => office.apply(e), viewport: () => vp, camera, usage: () => usage };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEvent, parseServerMessage, parseUsage } from "../../shared/events";
+import { parseEvent, parseServerMessage, parseUsage, SnapshotSchema, type Usage } from "../../shared/events";
 import { randomScenario, scriptedScenario } from "../../shared/scenario";
 import { animationForStation, stationForTool } from "../../shared/toolMapping";
 import { HookAdapter, summarize } from "../../server/hook-adapter";
@@ -151,5 +151,13 @@ describe("server tracker", () => {
     expect(snap.agents[1]!.last).toEqual({ type: "agent_tool", agentId: "c", tool: "Read" });
     t.apply({ type: "agent_despawn", agentId: "p" });
     expect(t.ids()).toEqual([]);
+  });
+
+  it("tracker keeps the latest usage and replays it in the snapshot", () => {
+    const t = new AgentTracker();
+    const u: Usage = { type: "usage", fiveHour: { usedPercentage: 40, resetsAt: 1893456000 } };
+    t.usage = u;
+    expect(t.snapshot().usage).toEqual(u);
+    expect(SnapshotSchema.safeParse(t.snapshot()).success).toBe(true);
   });
 });

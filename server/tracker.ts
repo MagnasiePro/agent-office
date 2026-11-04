@@ -1,7 +1,9 @@
-import type { AgentEvent, AgentSpawnEvent, Snapshot } from "../shared/events";
+import type { AgentEvent, AgentSpawnEvent, Snapshot, Usage } from "../shared/events";
 
 /** Server-side memory of live agents, replayed to every (re)connecting screen. */
 export class AgentTracker {
+  /** Latest plan usage, replayed to every (re)connecting screen. */
+  usage: Usage | undefined;
   private agents = new Map<string, { spawn: AgentSpawnEvent; last?: AgentEvent }>();
 
   apply(e: AgentEvent): void {
@@ -26,6 +28,6 @@ export class AgentTracker {
   snapshot(): Snapshot {
     // Parents first so sub-agents spawn next to them.
     const list = [...this.agents.values()].sort((a, b) => Number(!!a.spawn.parentId) - Number(!!b.spawn.parentId));
-    return { type: "snapshot", agents: list };
+    return { type: "snapshot", agents: list, ...(this.usage ? { usage: this.usage } : {}) };
   }
 }
