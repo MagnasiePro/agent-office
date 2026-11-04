@@ -173,9 +173,12 @@ put(CAFE_TABLE, 6, 12);
 put(COUCH, 9, 13);
 put(FLOOR_LAMP, 9, 10);
 put(PLANT_BIG, 0, 16);
-station("cafe", "cafe", "cafe", [
+// Reserved for parents waiting on a sub-agent (no idle preference names "coffee").
+station("coffee-bar", "coffee", "cafe", [
   { x: 1, y: 10, dir: "NE" },
   { x: 2, y: 10, dir: "NE" },
+]);
+station("cafe", "cafe", "cafe", [
   { x: 2, y: 13, dir: "SE" },
   { x: 4, y: 13, dir: "NW" },
   { x: 3, y: 14, dir: "NE" },

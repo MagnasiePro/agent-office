@@ -32,6 +32,10 @@ export class Agent {
   stateTime = 0;
   /** Seconds since the agent last received work (reset by the simulation on tool/waiting/done). */
   restTime = 0;
+  /** Station type the agent is working at; null when not working. */
+  station: string | null = null;
+  /** True while a finished session waits for its next prompt. */
+  awaitingPrompt = false;
   anim: AnimName = "spawn";
   animTime = 0;
   /** Seconds left before the current timed state ends (spawn, done, idle pause…). */

@@ -71,7 +71,7 @@ describe("agent state machine", () => {
     expect(agent("a").state).toBe("working");
   });
 
-  it("shows a question-mark wait for idle_prompt and resumes on the next tool", () => {
+  it("shows an input wait for a real question and resumes on the next tool", () => {
     apply({ type: "agent_spawn", agentId: "a", kind: "claude" });
     run(1);
     apply({ type: "agent_waiting", agentId: "a", need: "input" });
@@ -231,5 +231,66 @@ describe("snapshot reconciliation", () => {
     run(20);
     expect(office.agents.has("old")).toBe(false);
     expect(agent("new").anim).toBe("work_terminal");
+  });
+});
+
+describe("agent status visibility", () => {
+  const spawn = (id: string) => apply({ type: "agent_spawn", agentId: id, kind: "claude" });
+  const tileOf = (id: string) => ({ x: Math.floor(agent(id).x), y: Math.floor(agent(id).y) });
+
+  it("a parent waiting on a sub-agent takes a coffee at the bar", () => {
+    spawn("p");
+    run(1);
+    apply({ type: "agent_tool", agentId: "p", tool: "Task" });
+    run(20);
+    expect(agent("p").state).toBe("working");
+    expect(agent("p").station).toBe("coffee");
+    expect(slotOf("coffee")).toContainEqual(expect.objectContaining(tileOf("p")));
+  });
+
+  it("idle agents never take the coffee-bar slots", () => {
+    for (let i = 0; i < 6; i++) spawn(`a${i}`);
+    for (let t = 0; t < 120; t += 0.5) {
+      run(0.5);
+      for (const a of office.agents.values())
+        expect(slotOf("coffee")).not.toContainEqual(expect.objectContaining({ x: Math.floor(a.x), y: Math.floor(a.y) }));
+    }
+  });
+
+  it("a finished session awaiting its next prompt keeps its coffee break, with no beacon", () => {
+    spawn("a");
+    run(1);
+    apply({ type: "agent_tool", agentId: "a", tool: "Edit" });
+    run(15);
+    apply({ type: "agent_done", agentId: "a" });
+    run(5);
+    apply({ type: "agent_waiting", agentId: "a", need: "next_prompt" });
+    run(2);
+    expect(agent("a").state).not.toBe("waiting");
+    expect(agent("a").awaitingPrompt).toBe(true);
+    apply({ type: "agent_tool", agentId: "a", tool: "Read" });
+    run(1);
+    expect(agent("a").awaitingPrompt).toBe(false);
+  });
+
+  it("a real question on an idle agent still gets the beacon", () => {
+    spawn("a");
+    run(3);
+    apply({ type: "agent_waiting", agentId: "a", need: "input" });
+    run(2);
+    expect(agent("a").state).toBe("waiting");
+    expect(agent("a").anim).toBe("waiting_input");
+    expect(agent("a").awaitingPrompt).toBe(false);
+  });
+
+  it("station is set while working and cleared when leaving", () => {
+    spawn("a");
+    run(1);
+    apply({ type: "agent_tool", agentId: "a", tool: "Bash" });
+    run(15);
+    expect(agent("a").station).toBe("terminal");
+    apply({ type: "agent_waiting", agentId: "a" });
+    run(2);
+    expect(agent("a").station).toBeNull();
   });
 });

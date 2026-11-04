@@ -101,6 +101,7 @@ export class Office {
     a.restTime = 0;
     switch (e.type) {
       case "agent_tool": {
+        a.awaitingPrompt = false;
         m.finished = false;
         m.returnThenDespawn = false;
         const station = stationForTool(e.tool, this.tools);
@@ -109,6 +110,12 @@ export class Office {
         break;
       }
       case "agent_waiting":
+        // A finished session just waits for its next prompt: keep its break, no beacon.
+        if (e.need === "next_prompt") {
+          a.awaitingPrompt = true;
+          break;
+        }
+        a.awaitingPrompt = false;
         m.finished = false;
         this.release(a);
         a.state = "waiting";
@@ -129,6 +136,7 @@ export class Office {
         });
         break;
       case "agent_despawn":
+        a.awaitingPrompt = false;
         this.despawn(a);
         break;
     }
@@ -315,6 +323,7 @@ export class Office {
     a.state = "walking";
     a.walk(this.pathFor(a, target), () => {
       a.state = "working";
+      a.station = station;
       if (facing) a.dir = facing;
       a.setAnim(anim);
     });
@@ -368,6 +377,7 @@ export class Office {
   }
 
   private release(a: Agent): void {
+    a.station = null;
     for (const [k, id] of this.reserved) if (id === a.id) this.reserved.delete(k);
   }
 
