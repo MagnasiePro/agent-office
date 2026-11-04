@@ -114,6 +114,57 @@ test.describe("waiting beacons", () => {
   });
 });
 
+test.describe("station activity", () => {
+  test.use({ viewport: { width: 1920, height: 1080 } });
+  test("working agents light up their station", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto("/?ws=ws://localhost:1/none");
+    await ready(page);
+    const apply = (e: unknown) => page.evaluate((ev) => (window as unknown as { __agentOffice: Office }).__agentOffice.apply(ev), e);
+    await apply({ type: "agent_spawn", agentId: "a", kind: "claude" });
+    await page.waitForTimeout(2000);
+    await apply({ type: "agent_tool", agentId: "a", tool: "Bash", summary: "" });
+    await page.waitForFunction(() => (window as unknown as { __agentOffice: Office }).__agentOffice.office.agents.get("a")?.state === "working", null, { timeout: 20_000 });
+    await page.waitForTimeout(3000); // let the camera settle
+    const where = () =>
+      page.evaluate(() => {
+        const o = (window as unknown as { __agentOffice: Office }).__agentOffice;
+        const a = o.office.agents.get("a") as unknown as { x: number; y: number; state: string };
+        return { a: { x: a.x, y: a.y, state: a.state }, origin: o.view.origin, cam: { x: Math.round(o.camera.x), y: Math.round(o.camera.y) }, scale: o.viewport().scale };
+      });
+    const w = await where();
+    const png0 = decode(await page.screenshot());
+    await page.waitForTimeout(150);
+    const png1 = decode(await page.screenshot());
+    expect(await where()).toEqual(w);
+    expect(w.a.state).toBe("working");
+    // Pixels that differ between the two shots inside a world-space box (x0..x1, y0..y1 in screen px before scale).
+    const changed = (x0: number, y0: number, x1: number, y1: number) => {
+      let n = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const px = (x - w.cam.x) * w.scale;
+          const py = (y - w.cam.y) * w.scale;
+          if (px < 0 || py < 0 || px >= png0.width || py >= png0.height) continue;
+          const o = (py * png0.width + px) * 4;
+          if (png0.data[o] !== png1.data[o] || png0.data[o + 1] !== png1.data[o + 1] || png0.data[o + 2] !== png1.data[o + 2]) n++;
+        }
+      }
+      return n;
+    };
+    // The racks stand at x = 14. The box sits just above the rack top and right of the desk monitors behind it
+    // (they scroll on their own), so only the station effect can change it.
+    const rack = gridToScreen(14.5, Math.floor(w.a.y) + 0.5, w.origin);
+    const rx = Math.round(rack.x);
+    const ry = Math.round(rack.y);
+    expect(changed(rx - 4, ry - 72, rx + 8, ry - 48), "activity above the rack").toBeGreaterThan(0);
+    const floor = gridToScreen(20.5, 7.5, w.origin);
+    expect(changed(Math.round(floor.x) - 20, Math.round(floor.y) - 20, Math.round(floor.x) + 20, Math.round(floor.y) + 20), "empty floor stays still").toBe(0);
+    expect(errors).toEqual([]);
+  });
+});
+
 test.describe("depth sorting stability", () => {
   test.use({ viewport: { width: 1920, height: 1080 } });
   test("frozen frames with 30 agents are pixel-identical (no sort flicker)", async ({ page }) => {

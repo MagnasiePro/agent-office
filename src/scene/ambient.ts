@@ -5,7 +5,7 @@ import type { Agent } from "../engine/agent";
 import { toCanvas } from "../engine/canvas";
 import { drawAlertBubble, drawAskBubble, speechBubble } from "../engine/emotes";
 import { frameAt } from "../engine/sprite";
-import type { SizeClass } from "../characters/types";
+import type { Direction, SizeClass } from "../characters/types";
 import type { Speech } from "./office";
 import type { WorldLayout } from "../world/layout";
 import { fairySag } from "../world/roomRender";
@@ -14,6 +14,9 @@ function hash(n: number): number {
   const s = Math.sin(n * 91.7) * 43758.5453;
   return s - Math.floor(s);
 }
+
+/** One grid step in each facing direction. */
+const STEP: Record<Direction, [number, number]> = { NE: [0, -1], NW: [-1, 0], SE: [0, 1], SW: [1, 0] };
 
 /** Cheap living details drawn over the scene: twinkling stars, fairy lights, dust in the moonlight. */
 export class Ambient {
@@ -266,6 +269,109 @@ export class Ambient {
       // A waiting agent's big bubble wins over a neighbour's small "?".
       if (big.some((r) => x < r.x1 && x + c.width > r.x0 && y < r.y1 && y + c.height > r.y0)) continue;
       ctx.drawImage(c, x, y);
+    }
+  }
+
+  /** Furniture tile an agent at (tx, ty) works on: one step ahead, or two for a second-row slot. */
+  private stationTile(tx: number, ty: number, dir: Direction): Vec2 | null {
+    const [dx, dy] = STEP[dir];
+    for (let k = 1; k <= 2; k++) {
+      const x = tx + dx * k;
+      const y = ty + dy * k;
+      if (this.layout.furniture.some((p) => x >= p.x && x < p.x + p.def.footprint.w && y >= p.y && y < p.y + p.def.footprint.d)) return { x, y };
+    }
+    return null;
+  }
+
+  /**
+   * Overlay: the object in front of each working agent comes alive (screen, books, rack LEDs, marker,
+   * coffee machine), so a lit-up object always means someone works there. Subtler than the beacons.
+   */
+  drawStationFx(ctx: CanvasRenderingContext2D, agents: Iterable<Agent>, t: number): void {
+    const pal = this.pal;
+    for (const a of agents) {
+      if (a.state !== "working" || !a.station) continue;
+      const tile = this.stationTile(Math.floor(a.x), Math.floor(a.y), a.dir);
+      if (!tile) continue;
+      const s = gridToScreen(a.x, a.y, this.origin);
+      const sx = Math.round(s.x);
+      const sy = Math.round(s.y);
+      const anim = a.sprites.anims[a.anim];
+      const frame = anim.frames[a.dir][frameAt(anim.spec, a.animTime)]!;
+      const { anchor } = a.sprites.size;
+      const seed = a.id.length * 0.37;
+      // One pixel on the object (tile-local world units), hidden where the agent stands in front of it.
+      const dot = (lx: number, ly: number, z: number, c: string) => {
+        const w = worldToScreen(tile.x * UNIT + lx, tile.y * UNIT + ly, z);
+        const x = Math.floor(this.origin.x + w.x);
+        const y = Math.floor(this.origin.y + w.y);
+        if (frame.opaque(x - sx + anchor.x, y - sy + anchor.y)) return;
+        ctx.fillStyle = c;
+        ctx.fillRect(x, y, 1, 1);
+      };
+      // Pixels rising `rise` units from z0 over `period` s, thinning out near the top.
+      const rising = (n: number, lx: number, ly: number, z0: number, rise: number, period: number, c: string) => {
+        for (let i = 0; i < n; i++) {
+          const k = (t / period + i / n + seed) % 1;
+          if (bayer(i, Math.floor(k * 8)) > 1.1 - k) continue;
+          dot(lx + i * 3 + Math.round(Math.sin(t * 3 + i * 2)), ly, z0 + Math.floor(k * rise), c);
+        }
+      };
+      switch (a.station) {
+        case "desk": {
+          // Monitor screen (+y face at ly 6): three code rows flicker cream / mint at ~6 Hz, two sparks above.
+          const tick = Math.floor(t * 6);
+          [6, 4, 8].forEach((len, r) => {
+            const c = (tick + r) % 2 ? pal.cream : pal.mint1;
+            for (let i = 0; i < len; i++) dot(3 + i, 6, 27 - r * 2, c);
+          });
+          rising(2, 5, 6, 30, 8, 1.1, pal.butter);
+          break;
+        }
+        case "library": {
+          // One spine on the top shelf glows butter; a page flutters in front of the shelf.
+          for (let z = 36; z < 42; z++) for (let lx = 12; lx < 14; lx++) dot(lx, 12, z, z === 41 && Math.floor(t * 2) % 2 ? pal.white : pal.butter);
+          for (let i = 0; i < 2; i++) {
+            const f = Math.floor(t * 5 + i * 3) % 4;
+            dot(4 + i * 2 + (f % 2), 14, 30 + i * 3 + (f >> 1), pal.cream);
+          }
+          break;
+        }
+        case "terminal": {
+          // Rack face (+x face at lx 13): six LEDs blinking fast, each on its own phase; bits rising off the top.
+          for (let i = 0; i < 6; i++) {
+            if (Math.sin(t * 13 + i * 2.3 + seed) < 0) continue;
+            dot(13, i % 2 ? 13 : 7, 9 + Math.floor(i / 2) * 6, i % 3 ? pal.mint1 : pal.red);
+          }
+          rising(2, 7, 7, 48, 10, 0.9, pal.mint1);
+          break;
+        }
+        case "whiteboard": {
+          // A marker dot drawing a short wavy stroke on the board (+x face at lx 6), then starting over.
+          const n = Math.floor(((t / 1.6 + seed) % 1) * 9);
+          for (let i = 0; i <= n; i++) dot(6, 3 + i, 24 + (i % 4 === 1 ? 1 : i % 4 === 3 ? -1 : 0), i === n ? pal.ink : pal.sky1);
+          break;
+        }
+        case "coffee": {
+          // Steam over the machine, and a cup in the agent's hand with its own wisps.
+          rising(3, 6, 6, 29, 12, 1.4, pal.cream);
+          const h = a.sprites.size.head;
+          // Held at the side so it sticks out past the body: white mug, dark coffee in the rim.
+          const cx = sx + (a.mini ? 4 : 7);
+          const cy = sy + Math.round(h.y * 0.55);
+          ctx.fillStyle = pal.white;
+          ctx.fillRect(cx, cy, 3, 3);
+          ctx.fillStyle = pal.ink;
+          ctx.fillRect(cx + 1, cy, 1, 1);
+          ctx.fillStyle = pal.cream;
+          for (let i = 0; i < 2; i++) {
+            const k = (t * 0.8 + i * 0.5 + seed) % 1;
+            if (bayer(i, Math.floor(k * 8)) > 1.1 - k) continue;
+            ctx.fillRect(cx + i + Math.round(Math.sin(t * 3 + i)), cy - 2 - Math.floor(k * 5), 1, 1);
+          }
+          break;
+        }
+      }
     }
   }
 

@@ -92,6 +92,7 @@ const loop = startLoop((rawDt) => {
     ambient.drawLinks(c, office.links(), t);
     ambient.drawSleepy(c, office.agents.values(), t);
     ambient.drawSpeech(c, office.speeches(), office.agents);
+    ambient.drawStationFx(c, office.agents.values(), t);
     ambient.drawBeacons(c, office.agents.values(), t);
   }, (c) => ambient.drawBeaconRings(c, office.agents.values(), t));
 });
