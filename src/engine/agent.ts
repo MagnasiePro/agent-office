@@ -59,7 +59,7 @@ export class Agent {
   ) {
     this.x = tile.x + 0.5;
     this.y = tile.y + 0.5;
-    this.speed = sprites.variant.size === "mini" ? 2.6 : 2.1;
+    this.speed = sprites.variant.size === "mini" ? 3.9 : 3.2;
     this.timer = animDuration(sprites.anims.spawn.spec);
   }
 
