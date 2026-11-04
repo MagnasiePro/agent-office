@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -172,6 +172,45 @@ describe("git hooks", () => {
     await sleep(1500);
     expect(bodies).toEqual([]);
   });
+
+  it("a moved or deleted checkout leaves git working and silent", async () => {
+    // A checkout path with quote, dollar and backtick: the stored command must neither break nor expand it.
+    const co = join(tmp, "co 'q\"$HOME`x`");
+    mkdirSync(co);
+    for (const f of ["git-hooks.mjs", "git-hook.sh"]) copyFileSync(resolve("scripts", f), join(co, f));
+    await exec("node", [join(co, "git-hooks.mjs"), "install", String(port)], { env });
+    await commit(a, "before");
+    await git(a, "push", "-q");
+    await waitBodies(1);
+    expect(bodies).toEqual([{ repo: await toplevel(a), direction: "push" }]);
+    rmSync(co, { recursive: true });
+    await commit(b, "news");
+    await git(b, "push", "-q", "origin", "HEAD:news");
+    for (const step of [
+      () => commit(a, "after"),
+      () => git(a, "checkout", "-q", "-b", "side"),
+      () => git(a, "fetch", "-q"),
+      () => git(a, "push", "-q", "origin", "side"),
+    ]) {
+      expect((await step()).stderr).toBe("");
+    }
+  });
+
+  it("ref updates that do not touch remotes cost no more than a no-op hook", async () => {
+    // Spawning any hook costs tens of ms per phase on some machines; measure only what our script adds on top.
+    const loop = async (prefix: string) => {
+      const t0 = Date.now();
+      for (let i = 0; i < 20; i++) await git(a, "update-ref", `refs/heads/${prefix}${i}`, "HEAD");
+      return Date.now() - t0;
+    };
+    await git(a, "config", "--global", "hook.noop.event", "reference-transaction");
+    await git(a, "config", "--global", "hook.noop.command", "sh /dev/null");
+    const base = await loop("noop");
+    await git(a, "config", "--global", "--remove-section", "hook.noop");
+    await hooks("install", String(port));
+    const hooked = await loop("hooked");
+    expect(hooked).toBeLessThan(base + 500);
+  }, 20000);
 
   it("git is not slowed down or broken when the server is down", async () => {
     const closed = await new Promise<number>((r) => {

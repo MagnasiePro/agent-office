@@ -3,8 +3,22 @@
 #   sh git-hook.sh <port> pre-push <remote> <url>   records which tracking refs the push will move, and to what
 #   sh git-hook.sh <port> refs <state>              on a committed remote-tracking update, POSTs push or pull
 # Always exits 0 and never waits on the network: a non-zero exit would abort the user's push or ref update.
+# Known limits (each costs at most one misreported event):
+#   - `git push --no-verify` skips pre-push, so that push is reported as pull;
+#   - a non-default fetch refspec (not refs/heads/*:refs/remotes/<remote>/*) makes pushes report as pull;
+#   - the marker rewrite is not atomic across worktrees of one repo pushing at the same moment.
 port=$1
 kind=$2
+
+# Runs on all three phases of every ref update (each commit, checkout, rebase step): leave before any work.
+[ "$kind" = pre-push ] || [ "$3" = committed ] || exit 0
+[ "$kind" = pre-push ] || [ "$kind" = refs ] || exit 0
+
+# Only a remote-tracking ref moved to a commit counts: not a symref (origin/HEAD) nor a prune (all-zero new id).
+[ "$kind" = refs ] && {
+  moved=$(grep '^[^ ]* [0-9a-f]*[1-9a-f][0-9a-f]* refs/remotes/' | cut -d' ' -f2,3)
+  [ -n "$moved" ] || exit 0
+}
 
 common=$(git rev-parse --git-common-dir 2>/dev/null)
 # Absolute, so every worktree of a repo shares one marker.
@@ -24,11 +38,6 @@ if [ "$kind" = pre-push ]; then
   exit 0
 fi
 
-lines=$(cat)
-[ "$kind" = refs ] && [ "$3" = committed ] || exit 0
-# Only a remote-tracking ref moved to a commit counts: not a symref (origin/HEAD) nor a prune (all-zero new id).
-moved=$(printf '%s\n' "$lines" | grep '^[^ ]* [0-9a-f]*[1-9a-f][0-9a-f]* refs/remotes/' | cut -d' ' -f2,3)
-[ -n "$moved" ] || exit 0
 repo=$(git rev-parse --show-toplevel 2>/dev/null)
 [ -n "$repo" ] || exit 0
 repo=$(printf %s "$repo" | sed 's/\\/\\\\/g; s/"/\\"/g')

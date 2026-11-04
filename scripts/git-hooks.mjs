@@ -14,7 +14,9 @@ const script = fileURLToPath(new URL("git-hook.sh", import.meta.url));
 /** Section name → [git event, our kind argument]. */
 const HOOKS = { "agent-office-push": ["pre-push", "pre-push"], "agent-office-refs": ["reference-transaction", "refs"] };
 
-const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+// LC_ALL=C: the "no such section" match below must not depend on the user's locale.
+const git = (args, cwd) => execFileSync("git", args, { cwd, env: { ...process.env, LC_ALL: "C" }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const shq = (s) => `'${s.replaceAll("'", "'\\''")}'`;
 
 function remove() {
   for (const name of Object.keys(HOOKS)) {
@@ -39,7 +41,8 @@ if (cmd === "install" && !/^\d+$/.test(port)) {
   remove();
   for (const [name, [event, kind]] of Object.entries(HOOKS)) {
     git(["config", "--global", "--add", `hook.${name}.event`, event]);
-    git(["config", "--global", "--add", `hook.${name}.command`, `sh "${script}" ${port} ${kind}`]);
+    // Git appends its own args as "$@"; a moved or deleted checkout must not abort every commit and push.
+    git(["config", "--global", "--add", `hook.${name}.command`, `f=${shq(script)}; [ ! -f "$f" ] || sh "$f" ${port} ${kind}`]);
   }
   if (!listed()) {
     remove();
