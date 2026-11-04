@@ -68,4 +68,17 @@ describe("mail truck", () => {
     mail.update(step);
     expect(delivered).toEqual(["a", "b"]);
   });
+
+  it("a visit lasts at most 10 s", () => {
+    const mail = new MailService(OFFICE.truckLane);
+    mail.requestPickup();
+    expect(until(mail, () => mail.truck.state === "arriving", 1)).toBe(true);
+    let t = 0;
+    while (t < 20 && !(t > 0 && mail.truck.state === "away")) {
+      mail.update(step);
+      t += step;
+    }
+    expect(mail.truck.state).toBe("away");
+    expect(t).toBeLessThanOrEqual(10);
+  });
 });

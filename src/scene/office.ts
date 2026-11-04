@@ -16,6 +16,8 @@ interface Meta {
   pending: AgentEvent[];
   /** Mailbox errand in progress (it takes priority over the agent's other events). */
   errand: "post" | "fetch" | null;
+  /** Letters to post, waiting for the agent to be free (not mid-errand, waiting or done). */
+  toPost: number;
   /** Simulation time at which a letter being posted drops into the mailbox. */
   postAt: number | null;
   /** Simulation time at which a collected letter is put away. */
@@ -98,7 +100,8 @@ export class Office {
 
   // ── Events ────────────────────────────────────────────────────────────────
 
-  apply(e: AgentEvent): void {
+  /** `resumed`: the agent redoes its last event after an errand (that is not news, so it keeps a collected letter). */
+  apply(e: AgentEvent, resumed = false): void {
     if (e.type === "agent_spawn") return this.spawn(e.agentId, e.kind, e.parentId, e.label);
     let a = this.agents.get(e.agentId);
     if (!a) {
@@ -110,17 +113,22 @@ export class Office {
     }
     const m = this.meta.get(a.id)!;
     if (a.state === "despawning" || a.state === "gone") return;
-    if (a.state === "spawning" || (m.errand && e.type !== "agent_despawn")) {
+    if (a.state === "spawning") {
       m.pending.push(e);
       return;
     }
     if (e.type === "agent_mail") {
       if (this.leaving(m)) return;
-      if (e.direction === "push") this.startErrand(a, "post");
+      if (e.direction === "push") m.toPost++;
       else this.mail.requestDelivery(a.id);
+      this.startDueErrand(a);
       return;
     }
-    if (m.carryUntil !== null) {
+    if (m.errand && e.type !== "agent_despawn") {
+      m.pending.push(e);
+      return;
+    }
+    if (!resumed && m.carryUntil !== null) {
       m.carryUntil = null;
       a.carrying = null;
     }
@@ -139,6 +147,7 @@ export class Office {
       case "agent_waiting":
         // A finished session just waits for its next prompt: keep its break, no beacon.
         if (e.need === "next_prompt") {
+          m.last = null;
           a.awaitingPrompt = true;
           break;
         }
@@ -206,14 +215,14 @@ export class Office {
     const a = new Agent(id, kind, sprites, tile, parentId, label);
     a.dir = parent ? towardViewer(parent.dir) : "SE";
     this.agents.set(id, a);
-    this.meta.set(id, { isChild, children: 0, pending: [], errand: null, postAt: null, carryUntil: null, last: null, finished: false, returnThenDespawn: false, despawnAt: null, home: isChild ? null : this.claimHome(id) });
+    this.meta.set(id, { isChild, children: 0, pending: [], errand: null, toPost: 0, postAt: null, carryUntil: null, last: null, finished: false, returnThenDespawn: false, despawnAt: null, home: isChild ? null : this.claimHome(id) });
     this.reserved.set(tkey(tile), id);
   }
 
   private despawn(a: Agent, force = false): void {
     const m = this.meta.get(a.id)!;
     // A despawn cancels the errand, and a letter nobody will collect leaves the mailbox.
-    Object.assign(m, { errand: null, postAt: null, carryUntil: null });
+    Object.assign(m, { errand: null, toPost: 0, postAt: null, carryUntil: null });
     a.carrying = null;
     while (this.mail.takeLetter(a.id));
     const parent = a.parentId ? this.agents.get(a.parentId) : undefined;
@@ -258,13 +267,14 @@ export class Office {
         m.carryUntil = null;
         a.carrying = null;
       }
+      this.startDueErrand(a);
       switch (a.state) {
         case "spawning":
           if (a.timer === 0) {
             this.enterIdle(a, 0.4 + this.rng());
             // A new sub-agent gets briefed by its parent.
             if (a.parentId && this.agents.has(a.parentId)) this.converse(a.parentId, a.id, 2);
-            this.resumeAfterBusy(a);
+            this.replayPending(a);
           }
           break;
         case "done":
@@ -376,9 +386,9 @@ export class Office {
         return;
       }
       this.mail.takeLetter(a.id);
-      this.endErrand(a);
       a.carrying = "letter";
       m.carryUntil = this.time + CARRY_TIME;
+      this.endErrand(a);
     });
   }
 
@@ -386,31 +396,40 @@ export class Office {
   private fetchLetter(id: string): void {
     const a = this.agents.get(id);
     const m = this.meta.get(id);
-    if (!a || !m || a.state === "despawning" || a.state === "gone" || this.leaving(m)) {
-      this.mail.takeLetter(id);
-      return;
+    if (!a || !m || a.state === "despawning" || a.state === "gone" || this.leaving(m)) this.mail.takeLetter(id);
+    else this.startDueErrand(a);
+  }
+
+  /** Starts a deferred post, or the collection of a delivered letter, when the agent is free. Returns whether it did. */
+  private startDueErrand(a: Agent): boolean {
+    const m = this.meta.get(a.id)!;
+    // A beacon or a sub-agent's report-back is never interrupted; the errand waits for it to end.
+    if (m.errand || this.leaving(m) || ["spawning", "waiting", "done", "returning", "despawning", "gone"].includes(a.state)) return false;
+    if (m.toPost > 0) {
+      m.toPost--;
+      this.startErrand(a, "post");
+      return true;
     }
-    if (a.state !== "spawning" && !m.errand) this.startErrand(a, "fetch");
+    if (!this.mail.box.incoming.includes(a.id)) return false;
+    this.startErrand(a, "fetch");
+    return true;
   }
 
   private endErrand(a: Agent): void {
     const m = this.meta.get(a.id)!;
     m.errand = null;
-    if (this.resumeAfterBusy(a)) return;
-    if (m.last) this.apply(m.last);
-    else this.enterIdle(a, 1 + this.rng() * 2);
+    if (this.startDueErrand(a)) return;
+    this.replayPending(a);
+    // Nothing replayed moved it (e.g. a queued next_prompt): don't leave it parked at the mailbox.
+    if (!m.errand && a.state === "working" && a.station === "mailbox") {
+      if (m.last) this.apply(m.last, true);
+      else this.enterIdle(a, 1 + this.rng() * 2);
+    }
   }
 
-  /** After spawning or an errand: collect a waiting letter first, else replay queued events. False when there was nothing to do. */
-  private resumeAfterBusy(a: Agent): boolean {
-    const m = this.meta.get(a.id)!;
-    if (this.mail.box.incoming.includes(a.id)) {
-      this.startErrand(a, "fetch");
-      return true;
-    }
-    const queued = m.pending.splice(0);
-    for (const e of queued) this.apply(e);
-    return queued.length > 0;
+  /** Replays the events queued while the agent was spawning or on an errand. */
+  private replayPending(a: Agent): void {
+    for (const e of this.meta.get(a.id)!.pending.splice(0)) this.apply(e);
   }
 
   private goToStation(a: Agent, station: string, anim: AnimName, then?: () => void): void {

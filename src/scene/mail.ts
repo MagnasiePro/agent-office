@@ -1,5 +1,5 @@
 /** Truck speed in tiles per second, and how long it stays at the mailbox. */
-const SPEED = 3;
+const SPEED = 4.5;
 const STOP = 1.2;
 
 /**

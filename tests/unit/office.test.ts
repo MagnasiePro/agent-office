@@ -404,5 +404,90 @@ describe("mail truck errands", () => {
     run(3);
     expect(office.agents.has("a")).toBe(false);
   });
+
+  it("an agent waiting for permission stays put, then posts after its next tool", () => {
+    atDesk("a");
+    apply({ type: "agent_waiting", agentId: "a", need: "permission" });
+    run(2);
+    const tile = `${Math.floor(agent("a").x)},${Math.floor(agent("a").y)}`;
+    apply({ type: "agent_mail", agentId: "a", direction: "push" });
+    run(10);
+    expect(agent("a").state).toBe("waiting");
+    expect(`${Math.floor(agent("a").x)},${Math.floor(agent("a").y)}`).toBe(tile);
+    expect(agent("a").carrying).toBeNull();
+    apply({ type: "agent_tool", agentId: "a", tool: "Edit" });
+    expect(until(() => office.mail.box.outgoing === 1, 20)).toBe(true);
+  });
+
+  it("is not left parked at the mailbox when only a next_prompt came in during the errand", () => {
+    atDesk("a");
+    apply({ type: "agent_mail", agentId: "a", direction: "push" });
+    run(1);
+    apply({ type: "agent_waiting", agentId: "a", need: "next_prompt" });
+    expect(until(() => office.mail.box.outgoing === 1, 15)).toBe(true);
+    run(1);
+    expect(agent("a").state === "working" && agent("a").station === "mailbox").toBe(false);
+  });
+
+  it("a pull during a post errand calls the truck right away", () => {
+    atDesk("a");
+    apply({ type: "agent_mail", agentId: "a", direction: "push" });
+    run(1);
+    apply({ type: "agent_mail", agentId: "a", direction: "pull" });
+    run(0.1);
+    expect(office.mail.truck.state).toBe("arriving");
+    expect(office.mail.box.outgoing).toBe(0);
+  });
+
+  it("a fetch followed by a post: both errands run, then it goes back to work", () => {
+    atDesk("a");
+    const seat = `${agent("a").x},${agent("a").y}`;
+    apply({ type: "agent_mail", agentId: "a", direction: "pull" });
+    expect(until(() => office.mail.box.incoming.includes("a"), 30)).toBe(true);
+    apply({ type: "agent_mail", agentId: "a", direction: "push" });
+    expect(until(() => office.mail.box.outgoing === 1, 20)).toBe(true);
+    expect(office.mail.box.incoming).toEqual([]);
+    run(15);
+    expect(agent("a").station).toBe("desk");
+    expect(`${agent("a").x},${agent("a").y}`).toBe(seat);
+  });
+
+  for (const when of ["walking", "posting"] as const)
+    it(`despawn during a post errand (${when}) cancels it`, () => {
+      atDesk("a");
+      apply({ type: "agent_mail", agentId: "a", direction: "push" });
+      if (when === "walking") run(0.5);
+      else expect(until(() => atSlot("a") && agent("a").state === "working", 15)).toBe(true);
+      expect(office.mail.box.outgoing).toBe(0);
+      apply({ type: "agent_despawn", agentId: "a" });
+      expect(agent("a").carrying).toBeNull();
+      run(5);
+      expect(office.agents.has("a")).toBe(false);
+      expect(office.mail.box.outgoing).toBe(0);
+      expect(office.mail.truck.state).toBe("away");
+    });
+
+  it("a sub-agent that is done reports back to its parent before posting", () => {
+    apply({ type: "agent_spawn", agentId: "p", kind: "claude" });
+    run(1);
+    apply({ type: "agent_spawn", agentId: "c", parentId: "p", kind: "claude" });
+    run(1);
+    apply({ type: "agent_tool", agentId: "c", tool: "WebSearch" });
+    run(20);
+    apply({ type: "agent_done", agentId: "c" });
+    run(0.1);
+    apply({ type: "agent_mail", agentId: "c", direction: "push" });
+    let reported = false;
+    let returned = false;
+    expect(
+      until(() => {
+        if (agent("c").state === "returning") returned = true;
+        if (office.speeches().some((s) => s.agentId === "c")) reported = true;
+        return office.mail.box.outgoing === 1;
+      }, 40),
+    ).toBe(true);
+    expect(returned).toBe(true);
+    expect(reported).toBe(true);
+  });
 });
 
