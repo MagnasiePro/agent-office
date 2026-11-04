@@ -87,16 +87,16 @@ Tool to workstation (editable in [`shared/tool-stations.json`](../shared/tool-st
 
 How it detects a push or a pull:
 
-- A `pre-push` hook records which remote-tracking refs the push will move, and to which commit, in a marker file in `$TMPDIR`.
-- A `reference-transaction` hook sees the committed `refs/remotes/*` update. If it matches the marker, it is a push (one event per push); any other update of a remote-tracking ref is a pull.
+- A `pre-push` hook records which remote-tracking refs the push will move, and to which commit, in a marker file `agent-office-push` inside the repo's git directory (shared by its worktrees).
+- A `reference-transaction` hook sees the committed `refs/remotes/*` update. If it matches the marker, it is a push (one event per push); any other update of a remote-tracking ref is a pull. That includes IDE auto-fetch, and `git fetch --all` sends one pull (one truck) per remote that moved.
 
 Not detected or misreported (see the header of [`scripts/git-hook.sh`](../scripts/git-hook.sh)): failed pushes and "Already up to date" pulls send nothing; tag-only pushes and pushes to a raw URL are not detected; `git push --no-verify` and non-default fetch refspecs are reported as a pull.
 
-On screen the truck drives up, the agent posts a letter (push) or collects one (pull), and the truck leaves. An agent showing a waiting beacon finishes its wait first.
+On screen the truck drives up, the agent posts a letter (push) or collects one (pull), and the truck leaves. An agent showing a waiting beacon finishes its wait first; a wait that starts mid-errand interrupts it (a letter in hand is posted anyway). A sub-agent that ends right after a push still gets its letter posted.
 
 Remote-only GitHub MCP tools (no local git involved) count as a push on `PostToolUse`: the tool names ending with a suffix of `mail.push` in [`shared/tool-stations.json`](../shared/tool-stations.json) (`__push_files`, `__create_or_update_file`, `__delete_file` by default; `mail.pull` is empty).
 
-The hook sends `POST /git` with `{"repo": "/path/to/repo", "direction": "push" | "pull"}`. The server answers `202`, or `400` `{"error":"invalid git event"}`. It picks the session whose working directory is closest to the repo (exact match first, then the most recently active), and the mail goes to the agent or sub-agent that last used a tool there. Privacy: only the repo path leaves git, and only to localhost.
+The hook sends `POST /git` with `{"repo": "/path/to/repo", "direction": "push" | "pull"}`. The server answers `202`, or `400` with `{"error":"invalid JSON"}` or `{"error":"invalid git event"}`. It picks a session working in the repo or below it before one in a parent folder, then the closest working directory, then the most recently active, and the mail goes to the agent (or sub-agent) behind the session's latest hook event. Privacy: only the repo path leaves git, and only to localhost.
 
 ```bash
 curl -X POST localhost:4317/git -H 'content-type: application/json' \

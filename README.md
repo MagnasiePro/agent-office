@@ -77,7 +77,7 @@ node scripts/statusline.mjs install
 Two marker pies on the whiteboard show your 5-hour (left) and weekly (right) usage, red from 90 %. They stay empty until Claude Code reports usage, which only happens for Claude.ai Pro and Max subscribers. An existing status line keeps working, and `node scripts/statusline.mjs uninstall` restores it. Details in [Configuration](docs/configuration.md#status-line-usage-pies).
 
 > [!TIP]
-> <http://localhost:4317/gallery> shows every character, animation and piece of furniture.
+> <http://localhost:4317/gallery> shows every character, animation and piece of furniture. The mail truck and the mailbox's raised flag only appear in the office itself.
 
 ## Use it as a screen saver
 

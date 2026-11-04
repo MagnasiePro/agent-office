@@ -453,7 +453,7 @@ describe("mail truck errands", () => {
   });
 
   for (const when of ["walking", "posting"] as const)
-    it(`despawn during a post errand (${when}) cancels it`, () => {
+    it(`despawn during a post errand (${when}) still posts its letter`, () => {
       atDesk("a");
       apply({ type: "agent_mail", agentId: "a", direction: "push" });
       if (when === "walking") run(0.5);
@@ -461,11 +461,70 @@ describe("mail truck errands", () => {
       expect(office.mail.box.outgoing).toBe(0);
       apply({ type: "agent_despawn", agentId: "a" });
       expect(agent("a").carrying).toBeNull();
-      run(5);
+      expect(office.mail.box.outgoing).toBe(1);
+      expect(until(() => office.mail.truck.state === "stopped", 15)).toBe(true);
+      expect(until(() => office.mail.truck.state === "away", 30)).toBe(true);
       expect(office.agents.has("a")).toBe(false);
       expect(office.mail.box.outgoing).toBe(0);
-      expect(office.mail.truck.state).toBe("away");
+      expect(office.mail.flagUp).toBe(false);
     });
+
+  it("a sub-agent's last push is posted when it is done and despawned at once", () => {
+    apply({ type: "agent_spawn", agentId: "p", kind: "claude" });
+    run(1);
+    apply({ type: "agent_spawn", agentId: "c", parentId: "p", kind: "claude" });
+    run(1);
+    apply({ type: "agent_tool", agentId: "c", tool: "Bash" });
+    run(10);
+    apply({ type: "agent_mail", agentId: "c", direction: "push" }, { type: "agent_mail", agentId: "c", direction: "push" });
+    run(0.5);
+    apply({ type: "agent_done", agentId: "c" }, { type: "agent_despawn", agentId: "c" });
+    expect(office.mail.box.outgoing).toBe(2);
+    expect(until(() => office.mail.truck.state === "stopped", 15)).toBe(true);
+    expect(until(() => !office.mail.flagUp, 5)).toBe(true);
+  });
+
+  it("a push for an agent on its way out is posted for it", () => {
+    apply({ type: "agent_spawn", agentId: "p", kind: "claude" });
+    run(1);
+    apply({ type: "agent_spawn", agentId: "c", parentId: "p", kind: "claude" });
+    run(1);
+    apply({ type: "agent_tool", agentId: "c", tool: "WebSearch" });
+    run(20);
+    apply({ type: "agent_despawn", agentId: "c" });
+    expect(agent("c").state).toBe("returning");
+    apply({ type: "agent_mail", agentId: "c", direction: "push" });
+    expect(office.mail.box.outgoing).toBe(1);
+    expect(until(() => office.mail.truck.state === "stopped", 15)).toBe(true);
+  });
+
+  it("a permission wait during a post errand shows at once and the letter is posted for it", () => {
+    atDesk("a");
+    apply({ type: "agent_mail", agentId: "a", direction: "push" });
+    run(0.5);
+    expect(atSlot("a")).toBe(false);
+    apply({ type: "agent_waiting", agentId: "a", need: "permission" });
+    expect(agent("a").state).toBe("waiting");
+    expect(agent("a").carrying).toBeNull();
+    expect(office.mail.box.outgoing).toBe(1);
+    expect(until(() => office.mail.truck.state === "stopped", 15)).toBe(true);
+    run(3);
+    expect(agent("a").state).toBe("waiting");
+  });
+
+  it("a permission wait during a fetch errand leaves the letter for later", () => {
+    atDesk("a");
+    apply({ type: "agent_mail", agentId: "a", direction: "pull" });
+    expect(until(() => office.mail.box.incoming.includes("a"), 30)).toBe(true);
+    expect(atSlot("a")).toBe(false);
+    apply({ type: "agent_waiting", agentId: "a", need: "permission" });
+    expect(agent("a").state).toBe("waiting");
+    run(5);
+    expect(office.mail.box.incoming).toEqual(["a"]);
+    apply({ type: "agent_tool", agentId: "a", tool: "Edit" });
+    expect(until(() => office.mail.box.incoming.length === 0, 20)).toBe(true);
+    expect(agent("a").carrying).toBe("letter");
+  });
 
   it("a sub-agent that is done reports back to its parent before posting", () => {
     apply({ type: "agent_spawn", agentId: "p", kind: "claude" });

@@ -72,16 +72,21 @@ export class HookAdapter {
 
   constructor(private now: () => number = Date.now) {}
 
-  /** Credits a git push/pull in `repo` to the session working there: closest cwd (exact repo first), then most recently seen. */
+  /**
+   * Credits a git push/pull in `repo` to the session working there: a session in the repo (or below it) before one in a
+   * parent folder, then the closest cwd, then the most recently seen.
+   */
   git(repo: string, direction: "push" | "pull"): AgentEvent[] {
     const r = repo.replace(/\/+$/, "");
     let best: Session | undefined;
-    let bestGap = Infinity;
+    let bestRank = Infinity;
     for (const s of this.sessions.values()) {
       const c = s.cwd?.replace(/\/+$/, "");
-      if (!c || !(c === r || c.startsWith(`${r}/`) || r.startsWith(`${c}/`))) continue;
-      const gap = Math.abs(c.length - r.length); // 0 = the session sits exactly in the repo
-      if (gap < bestGap || (gap === bestGap && s.lastSeen >= best!.lastSeen)) [best, bestGap] = [s, gap];
+      const inside = !!c && (c === r || c.startsWith(`${r}/`));
+      if (!c || !(inside || r.startsWith(`${c}/`))) continue;
+      // Parent folders rank after every session inside the repo; within a group, a smaller gap wins (0 = exactly the repo).
+      const rank = (inside ? 0 : 1e9) + Math.abs(c.length - r.length);
+      if (rank < bestRank || (rank === bestRank && s.lastSeen >= best!.lastSeen)) [best, bestRank] = [s, rank];
     }
     return best ? [{ type: "agent_mail", agentId: best.lastActor, direction }] : [];
   }

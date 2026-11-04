@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -110,6 +110,9 @@ describe("git hooks", () => {
     await expect(git(a, "push", "-q")).rejects.toThrow();
     await sleep(1500);
     expect(bodies).toEqual([]);
+    // The marker lives in the repo's git common dir, not in a shared temp dir.
+    expect(existsSync(join(a, ".git/agent-office-push"))).toBe(true);
+    expect(readdirSync(env.TMPDIR!)).toEqual([]);
   });
 
   it("pushing two branches at once sends one push", async () => {
@@ -120,7 +123,7 @@ describe("git hooks", () => {
     await waitBodies(1);
     await sleep(1000);
     expect(bodies).toEqual([{ repo: await toplevel(a), direction: "push" }]);
-    expect(readdirSync(env.TMPDIR!).filter((f) => f.startsWith("agent-office-push-"))).toEqual([]);
+    expect(readdirSync(join(a, ".git")).filter((f) => f.startsWith("agent-office-push"))).toEqual([]);
   });
 
   it("a fetch after a rejected push sends pull, not push", async () => {

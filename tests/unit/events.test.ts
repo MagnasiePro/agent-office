@@ -14,6 +14,8 @@ describe("event contract (zod)", () => {
       { type: "agent_waiting", agentId: "a" },
       { type: "agent_done", agentId: "a" },
       { type: "agent_despawn", agentId: "a" },
+      { type: "agent_mail", agentId: "a", direction: "push" },
+      { type: "agent_mail", agentId: "a", direction: "pull" },
     ]) expect(parseEvent(e)).toEqual(e);
   });
 
@@ -207,6 +209,14 @@ describe("mail truck routing", () => {
     a.handle(start("c", "/w/app"));
     expect(a.git("/w/app/packages/ui", "pull")).toEqual([{ type: "agent_mail", agentId: "b", direction: "pull" }]);
     expect(a.git("/w/app/", "pull")).toEqual([{ type: "agent_mail", agentId: "c", direction: "pull" }]);
+  });
+
+  it("prefers a session inside the repo over one in a parent folder, however deep", () => {
+    let t = 0;
+    const a = new HookAdapter(() => ++t);
+    a.handle(start("deep", "/w/app/src/deep"));
+    a.handle(start("parent", "/w"));
+    expect(a.git("/w/app", "push")).toEqual([{ type: "agent_mail", agentId: "deep", direction: "push" }]);
   });
 
   it("attributes mail to the sub-agent that last used a tool", () => {

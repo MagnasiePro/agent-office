@@ -20,10 +20,9 @@ kind=$2
   [ -n "$moved" ] || exit 0
 }
 
-common=$(git rev-parse --git-common-dir 2>/dev/null)
-# Absolute, so every worktree of a repo shares one marker.
-common=$(cd "${common:-.}" 2>/dev/null && pwd -P)
-m="${TMPDIR:-/tmp}/agent-office-push-$(printf %s "$common" | cksum | cut -d' ' -f1)"
+# In the git common dir: private to the repo (not a guessable name in a shared /tmp) and shared by its worktrees.
+common=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
+m="$common/agent-office-push"
 
 if [ "$kind" = pre-push ]; then
   # Marker: epoch time, then one "refs/remotes/<remote>/<branch> <sha>" line per branch pushed (deletions skipped).

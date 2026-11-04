@@ -112,19 +112,24 @@ export class Office {
       a = this.agents.get(e.agentId)!;
     }
     const m = this.meta.get(a.id)!;
+    if (e.type === "agent_mail" && e.direction === "push" && (a.state === "despawning" || this.leaving(m))) return this.postFor(1);
     if (a.state === "despawning" || a.state === "gone") return;
     if (a.state === "spawning") {
       m.pending.push(e);
       return;
     }
     if (e.type === "agent_mail") {
-      if (this.leaving(m)) return;
+      if (this.leaving(m)) return; // a pull for an agent on its way out is dropped
       if (e.direction === "push") m.toPost++;
       else this.mail.requestDelivery(a.id);
       this.startDueErrand(a);
       return;
     }
-    if (m.errand && e.type !== "agent_despawn") {
+    // A beacon must show at once: it cancels the errand (a letter being fetched stays in the box for later).
+    if (m.errand && e.type === "agent_waiting" && e.need !== "next_prompt") {
+      this.cancelErrand(a);
+      this.replayPending(a);
+    } else if (m.errand && e.type !== "agent_despawn") {
       m.pending.push(e);
       return;
     }
@@ -221,8 +226,10 @@ export class Office {
 
   private despawn(a: Agent, force = false): void {
     const m = this.meta.get(a.id)!;
-    // A despawn cancels the errand, and a letter nobody will collect leaves the mailbox.
-    Object.assign(m, { errand: null, toPost: 0, postAt: null, carryUntil: null });
+    // A despawn cancels the errand: its outgoing letters are posted for it, a letter nobody will collect leaves the mailbox.
+    this.cancelErrand(a);
+    this.postFor(m.toPost);
+    Object.assign(m, { toPost: 0, carryUntil: null });
     a.carrying = null;
     while (this.mail.takeLetter(a.id));
     const parent = a.parentId ? this.agents.get(a.parentId) : undefined;
@@ -371,6 +378,24 @@ export class Office {
   /** A session or sub-agent on its way out (returning to say goodbye, or about to vanish) runs no errands. */
   private leaving(m: Meta): boolean {
     return m.returnThenDespawn || m.despawnAt !== null;
+  }
+
+  /** Drops `n` letters straight into the mailbox and calls the truck. */
+  private postFor(n: number): void {
+    if (n <= 0) return;
+    for (let i = 0; i < n; i++) this.mail.post();
+    this.mail.requestPickup();
+  }
+
+  /** Stops the errand in progress; a letter being posted goes into the mailbox anyway. */
+  private cancelErrand(a: Agent): void {
+    const m = this.meta.get(a.id)!;
+    if (m.errand === "post") {
+      this.postFor(1);
+      a.carrying = null;
+    }
+    m.errand = null;
+    m.postAt = null;
   }
 
   /** Walks to the mailbox to post a letter, or to collect one the truck dropped. */

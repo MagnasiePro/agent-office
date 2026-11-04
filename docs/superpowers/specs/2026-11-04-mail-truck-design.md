@@ -45,9 +45,9 @@ Two sections because a hook command can't tell which event invoked it; git appen
 
 `scripts/git-hook.sh` (POSIX sh — node start-up on every ref update would slow git):
 
-- `pre-push`: writes a marker file `${TMPDIR:-/tmp}/agent-office-push-<hash of the git common dir>` (touch). No network call.
+- `pre-push`: writes a marker file `<git common dir>/agent-office-push` (private to the repo, shared by its worktrees; never a guessable name in a shared `/tmp`) listing the tracking refs the push will move and to which commit. No network call.
 - `reference-transaction committed`: reads the ref updates on stdin; if any line touches `refs/remotes/`:
-  - marker exists and is < 120 s old → **push** (delete the marker);
+  - the moved ref and commit are listed in a marker < 120 s old → **push** (the line is removed; one POST per marker);
   - otherwise → **pull**.
   It then sends `POST http://localhost:<port>/git` `{ "repo": "<git rev-parse --show-toplevel>", "direction": "push" | "pull" }` with `curl -s -m 0.5`, in the background, output discarded.
 - Any other event/state: exit immediately. **Always exit 0** (a non-zero `reference-transaction prepared` would abort git's transaction; a non-zero `pre-push` would abort the push).
@@ -58,8 +58,8 @@ Installer (same conventions as `claude-hooks.mjs` / `statusline.mjs`): `install 
 
 ### 2. Server: who gets the mail
 
-- `HookAdapter` remembers, per Claude Code session, its `cwd` and the last actor (session agent or sub-agent) that used a tool, with a timestamp.
-- `POST /git` → `adapter.git(repo, direction)`: picks the session whose `cwd` equals `repo` or is inside it (`repo + "/"` prefix), most recently active first, and emits `{ type: "agent_mail", agentId: <its last actor>, direction }`. No matching session → no event (`202`, `accepted: 0`).
+- `HookAdapter` remembers, per Claude Code session, its `cwd` and the last actor (the session agent or sub-agent behind its latest hook event), with a timestamp.
+- `POST /git` → `adapter.git(repo, direction)`: picks a session whose `cwd` equals `repo` or is inside it (`repo + "/"` prefix) before one whose `cwd` is a parent folder of `repo`, then the closest `cwd`, then the most recently active, and emits `{ type: "agent_mail", agentId: <its last actor>, direction }`. No matching session → no event (`202`, `accepted: 0`).
 - Remote-only tools: `PostToolUse` of a tool whose name ends with one of the suffixes in `shared/tool-stations.json` → `"mail": { "push": ["__push_files", "__create_or_update_file", "__delete_file"], "pull": [] }` emits `agent_mail` for that actor.
 - `agent_mail` is transient: the tracker does not store it as `last` and snapshots never replay it.
 
@@ -69,7 +69,9 @@ Installer (same conventions as `claude-hooks.mjs` / `statusline.mjs`): `install 
 - One truck, one mailbox. Pending mail is a queue; the truck serves everything pending in one trip (drops all pulls, collects all posted pushes).
 - **Push:** the agent starts an errand: walks to the mailbox slot carrying a letter, posts it (mailbox "outgoing" +1, flag up), resumes. When at least one letter is posted and the truck is idle, the truck comes, stops, collects (flag down), leaves.
 - **Pull:** the truck comes (if idle; else on its next trip), drops one letter per pending pull (flag up), leaves. Each addressee then runs an errand: walks to the mailbox, takes its letter (flag down when empty), carries it for ~3 s.
-- An errand is short and takes priority: tool / waiting events received during an errand are queued and replayed when it ends (like events received while spawning). A despawn cancels it.
+- An errand is short and takes priority: tool events and `next_prompt` waits received during an errand are queued and replayed when it ends (like events received while spawning).
+- A blocking wait (permission / input) cancels the errand so its beacon shows at once: a letter being posted drops into the mailbox anyway (truck called), a letter being fetched stays in the box until the wait ends.
+- A despawn cancels the errand too, but the agent's outgoing letters (the one in hand and any still queued) are posted for it and the truck called; so is a push that arrives while the agent is on its way out. A pull letter for a gone agent is dropped.
 - The truck stops ~1 s to load/unload; whole visit ≈ 8–10 s.
 
 ### 4. Office layout and art (owner: "adapt the office if needed")
