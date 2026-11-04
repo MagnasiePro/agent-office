@@ -29,11 +29,13 @@ const camera = new Camera(view.width, view.height, worldContentRows(OFFICE));
 const canvas = document.createElement("canvas");
 document.body.append(canvas);
 const ctx = canvas.getContext("2d", { alpha: false })!;
-let vp = viewportFor(view.width, view.height, innerWidth, innerHeight, devicePixelRatio, VIEW_W, VIEW_H);
+/** Width (css px) of the update column on the right; 0 when there is nothing to offer. */
+let column = 0;
+let vp = viewportFor(view.width, view.height, innerWidth - column, innerHeight, devicePixelRatio, VIEW_W, VIEW_H);
 let sky: HTMLCanvasElement;
 
 function fit(): void {
-  vp = viewportFor(view.width, view.height, innerWidth, innerHeight, devicePixelRatio, VIEW_W, VIEW_H);
+  vp = viewportFor(view.width, view.height, innerWidth - column, innerHeight, devicePixelRatio, VIEW_W, VIEW_H);
   canvas.width = vp.w;
   canvas.height = vp.h;
   canvas.style.width = `${vp.cssW}px`;
@@ -45,6 +47,31 @@ function fit(): void {
 }
 addEventListener("resize", fit);
 fit();
+
+const notice = document.createElement("aside");
+notice.id = "update";
+notice.innerHTML = `<div class="dot"></div><div></div><div class="muted">update.mjs apply</div>`;
+document.body.append(notice);
+function showUpdate(info: { available: boolean; latest: string | null }): void {
+  notice.children[1]!.textContent = `v${info.latest} available`;
+  notice.classList.toggle("on", info.available);
+  const next = info.available ? 120 : 0;
+  if (next !== column) {
+    column = next;
+    fit();
+  }
+}
+/** Hourly look at the server's update check (see docs/configuration.md#updates). */
+function refreshUpdate(): void {
+  fetch("/health")
+    .then((r) => r.json())
+    .then((h: { update?: { available: boolean; latest: string | null } }) => h.update && showUpdate(h.update))
+    .catch(() => {});
+}
+if (!params.get("mock")) {
+  refreshUpdate();
+  setInterval(refreshUpdate, 3600_000);
+}
 
 /** QA only: `?freeze=S` stops the clock and incoming events after S seconds (frames keep rendering). */
 const freezeAt = params.has("freeze") ? Number(params.get("freeze")) : Infinity;
@@ -101,4 +128,4 @@ const loop = startLoop((rawDt) => {
 });
 
 // Hook for QA tooling (Playwright): live stats, viewport and the simulation.
-(window as unknown as { __agentOffice: unknown }).__agentOffice = { office, stats: loop.stats, apply: (e: AgentEvent) => office.apply(e), viewport: () => vp, view, camera, usage: () => usage };
+(window as unknown as { __agentOffice: unknown }).__agentOffice = { office, stats: loop.stats, apply: (e: AgentEvent) => office.apply(e), viewport: () => vp, view, camera, usage: () => usage, showUpdate };

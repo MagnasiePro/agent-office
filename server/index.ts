@@ -6,12 +6,15 @@ import { parseEvent, parseGitEvent, parseUsageUpdate, type AgentEvent, type Usag
 import { play, randomScenario, scriptedScenario } from "../shared/scenario";
 import { HookAdapter } from "./hook-adapter";
 import { AgentTracker } from "./tracker";
+import { checkUpdate, readVersion, type UpdateInfo } from "../scripts/update.mjs";
 
 const PORT = Number(process.env.PORT ?? 4317);
 const PROD = process.env.NODE_ENV === "production";
 /** Built-in demo so `pnpm dev` is lively out of the box; it stops at the first real event. Disable with DEMO=0. */
 const DEMO = process.env.DEMO !== "0";
 const ROOT = join(import.meta.dirname, "..");
+/** Daily look at the latest GitHub release; only offers, never applies. Disable with UPDATE_CHECK=0. */
+const UPDATE_CHECK = process.env.UPDATE_CHECK !== "0";
 
 const tracker = new AgentTracker();
 const adapter = new HookAdapter();
@@ -54,6 +57,19 @@ function external(): void {
     stopDemo();
     stopDemo = null;
   }
+}
+
+// ── Update check ─────────────────────────────────────────────────────────────
+let update: UpdateInfo = { current: readVersion(ROOT), latest: null, available: false, url: null };
+async function refreshUpdate(): Promise<void> {
+  const next = await checkUpdate(update.current);
+  if (next.available && next.latest !== update.latest) console.log(`[agent-office] update available: v${next.current} → v${next.latest} (node scripts/update.mjs apply)`);
+  // A failed check keeps the last known result instead of hiding a pending update.
+  if (next.latest) update = next;
+}
+if (UPDATE_CHECK) {
+  void refreshUpdate();
+  setInterval(() => void refreshUpdate(), 24 * 3600_000).unref();
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────
@@ -145,7 +161,7 @@ async function api(req: IncomingMessage, res: ServerResponse): Promise<boolean> 
     return true;
   }
   if (req.method === "GET" && url.pathname === "/health") {
-    json(res, 200, { ok: true, clients: clients.size, agents: tracker.ids().length, demo: !!stopDemo });
+    json(res, 200, { ok: true, clients: clients.size, agents: tracker.ids().length, demo: !!stopDemo, update });
     return true;
   }
   return false;

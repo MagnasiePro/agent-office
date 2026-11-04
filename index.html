@@ -7,6 +7,11 @@
     <style>
       html, body { margin: 0; height: 100%; background: #110d1a; overflow: hidden; cursor: none; }
       canvas { position: absolute; image-rendering: pixelated; }
+      /* Update notice: its own column beside the scene, never drawn over it. */
+      #update { position: absolute; top: 0; right: 0; bottom: 0; width: 120px; box-sizing: border-box; padding: 14px 12px; display: none; flex-direction: column; justify-content: flex-end; gap: 6px; background: #0b0812; color: #b9a8d9; font: 12px/1.35 ui-monospace, Menlo, monospace; }
+      #update.on { display: flex; }
+      #update .dot { width: 8px; height: 8px; border-radius: 50%; background: #f3b23c; }
+      #update .muted { color: #6d5f8a; }
     </style>
   </head>
   <body>

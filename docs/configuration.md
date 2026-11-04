@@ -9,6 +9,7 @@ Everything beyond the [quick start](../README.md#quick-start): commands, setting
 - [Status line (usage pies)](#status-line-usage-pies)
 - [Event API](#event-api)
 - [Background server and screen saver](#background-server-and-screen-saver)
+- [Updates](#updates)
 
 ## Commands
 
@@ -21,6 +22,8 @@ Everything beyond the [quick start](../README.md#quick-start): commands, setting
 | `pnpm test:visual` | Browser tests (Playwright; run `npx playwright install chromium` once) |
 | `pnpm typecheck` | TypeScript check |
 | `pnpm perf` | Measures FPS and CPU over 5 minutes → `docs/qa/perf.json` |
+| `node scripts/update.mjs check` | Current version and latest release ([Updates](#updates)) |
+| `node scripts/update.mjs apply` | Update this checkout to the latest release, after confirmation |
 
 ## Settings
 
@@ -28,6 +31,7 @@ Everything beyond the [quick start](../README.md#quick-start): commands, setting
 |---|---|---|
 | `PORT` | `4317` | Server port |
 | `DEMO` | on | Built-in demo that stops at the first real event. `DEMO=0` turns it off |
+| `UPDATE_CHECK` | on | Daily look for a new release on GitHub ([Updates](#updates)). `UPDATE_CHECK=0` turns it off: no network request, no notice |
 
 ```bash
 DEMO=0 PORT=5000 pnpm dev
@@ -182,6 +186,29 @@ The schema lives in [`shared/events.ts`](../shared/events.ts).
 
 ## Background server and screen saver
 
-`scripts/launchagent.sh install` installs a LaunchAgent (`com.agent-office.server`) that starts the server at login and restarts it if it stops. Logs: `~/Library/Logs/agent-office.log`. Also `status` and `uninstall`. Run `install` again after updating the code; if `bootstrap` fails right after `bootout`, run it once more.
+`scripts/launchagent.sh install` installs a LaunchAgent (`com.agent-office.server`) that starts the server at login and restarts it if it stops. Logs: `~/Library/Logs/agent-office.log`. Also `status`, `restart` (keeps its settings) and `uninstall`. Run `install` again to change `PORT`, `DEMO` or `UPDATE_CHECK`; if `bootstrap` fails right after `bootout`, run it once more.
 
 The screen saver only displays `http://localhost:4317/` in a web view, so a `pnpm build` is picked up without rebuilding it. After rebuilding the screen saver itself, run `killall legacyScreenSaver ScreenSaverEngine`. Variants, internals and limitations: [`saver/README.md`](../saver/README.md).
+
+## Updates
+
+Agent Office offers updates; it never installs them on its own.
+
+**What counts as an update.** A GitHub release tagged `vX.Y.Z`, newer than `version` in your `package.json`. Commits on `main` between releases are not offered.
+
+**How you hear about it.** The server checks the [latest release](https://github.com/MagnasiePro/agent-office/releases/latest) at startup and every 24 hours. When one is newer, it logs `update available: v0.1.0 → v0.2.0`, reports it in `GET /health` (`update: { current, latest, available, url }`), and the screen shows a narrow column on the right edge, beside the scene, with the new version. No update, no column. Offline or rate-limited by GitHub: nothing happens, it tries again later. `UPDATE_CHECK=0` turns the check off.
+
+**Applying it.** In your clone:
+
+```bash
+node scripts/update.mjs apply
+```
+
+It shows what it will do and asks for confirmation (`--yes` skips the question), then runs `git merge --ff-only vX.Y.Z`, `pnpm install --frozen-lockfile` and `pnpm build`, and restarts the background server if it runs from this folder (`scripts/launchagent.sh restart`, which keeps your settings). It refuses, without changing anything, when:
+
+- you are not on `main` (a feature branch or a detached HEAD);
+- you have uncommitted changes (it never stashes or resets your work);
+- your `main` has local commits, so it cannot fast-forward;
+- the folder is not a git clone (download the release instead).
+
+Before changing anything it prints the commit you are on and the exact command to go back. If the release changed the screen saver, it reminds you to rebuild it with `saver/legacy/build.sh`.

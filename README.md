@@ -102,7 +102,7 @@ saver/legacy/build.sh
 > [!NOTE]
 > **Company Mac with a forced screen saver?** If your organization's MDM profile enforces the screen saver, macOS ignores your choice and shows its own. Ask your administrator to lift it. A menu bar app ([`saver/lock/`](saver/lock/README.md)) can show the scene instead, but it is **less secure than the macOS lock screen and not recommended on a company Mac**.
 
-After updating the code, run `scripts/launchagent.sh install` again. Other screen saver variants and troubleshooting are in [`saver/README.md`](saver/README.md).
+When a new version is out, a column on the right of the screen says so; update with `node scripts/update.mjs apply` ([details](docs/configuration.md#updates)). Other screen saver variants and troubleshooting are in [`saver/README.md`](saver/README.md).
 
 ## Further reading
 
