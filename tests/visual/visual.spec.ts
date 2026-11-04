@@ -139,28 +139,51 @@ test.describe("station activity", () => {
     const png1 = decode(await page.screenshot());
     expect(await where()).toEqual(w);
     expect(w.a.state).toBe("working");
-    // Pixels that differ between the two shots inside a world-space box (x0..x1, y0..y1 in screen px before scale).
-    const changed = (x0: number, y0: number, x1: number, y1: number) => {
-      let n = 0;
+    type Png = ReturnType<typeof decode>;
+    // Visits each canvas pixel of a world-space box (x0..x1, y0..y1 in screen px before scale).
+    const each = (png: Png, x0: number, y0: number, x1: number, y1: number, f: (o: number) => void) => {
       for (let y = y0; y < y1; y++) {
         for (let x = x0; x < x1; x++) {
           const px = (x - w.cam.x) * w.scale;
           const py = (y - w.cam.y) * w.scale;
-          if (px < 0 || py < 0 || px >= png0.width || py >= png0.height) continue;
-          const o = (py * png0.width + px) * 4;
-          if (png0.data[o] !== png1.data[o] || png0.data[o + 1] !== png1.data[o + 1] || png0.data[o + 2] !== png1.data[o + 2]) n++;
+          if (px >= 0 && py >= 0 && px < png.width && py < png.height) f((py * png.width + px) * 4);
         }
       }
+    };
+    const changed = (a: Png, b: Png, x0: number, y0: number, x1: number, y1: number) => {
+      let n = 0;
+      each(a, x0, y0, x1, y1, (o) => (n += a.data[o] !== b.data[o] || a.data[o + 1] !== b.data[o + 1] || a.data[o + 2] !== b.data[o + 2] ? 1 : 0));
       return n;
     };
-    // The racks stand at x = 14. The box sits just above the rack top and right of the desk monitors behind it
-    // (they scroll on their own), so only the station effect can change it.
+    const white = (png: Png, x0: number, y0: number, x1: number, y1: number) => {
+      const [r, g, bl] = [1, 3, 5].map((i) => parseInt(SCENE_WARM.white.slice(i, i + 2), 16));
+      let n = 0;
+      each(png, x0, y0, x1, y1, (o) => (n += png.data[o] === r && png.data[o + 1] === g && png.data[o + 2] === bl ? 1 : 0));
+      return n;
+    };
+    // The racks stand at x = 14. The "above" box sits just above the rack top, right of the desk monitors behind it
+    // (they scroll on their own) and left of where a waiting agent's beam would rise, so only the station effect
+    // changes it. The "face" box covers the rack's front face, where only the effect's progress bar is white.
     const rack = gridToScreen(14.5, Math.floor(w.a.y) + 0.5, w.origin);
     const rx = Math.round(rack.x);
     const ry = Math.round(rack.y);
-    expect(changed(rx - 4, ry - 72, rx + 8, ry - 48), "activity above the rack").toBeGreaterThan(0);
+    const above = [rx - 4, ry - 72, rx + 5, ry - 48] as const;
+    const face = [rx - 4, ry - 30, rx + 3, ry + 4] as const;
+    expect(changed(png0, png1, ...above), "activity above the rack").toBeGreaterThan(0);
+    expect(white(png0, ...face) + white(png1, ...face), "progress bar on the rack face").toBeGreaterThan(0);
     const floor = gridToScreen(20.5, 7.5, w.origin);
-    expect(changed(Math.round(floor.x) - 20, Math.round(floor.y) - 20, Math.round(floor.x) + 20, Math.round(floor.y) + 20), "empty floor stays still").toBe(0);
+    expect(changed(png0, png1, Math.round(floor.x) - 20, Math.round(floor.y) - 20, Math.round(floor.x) + 20, Math.round(floor.y) + 20), "empty floor stays still").toBe(0);
+    // Same agent, same slot, but blocked on the user: the station goes quiet.
+    await apply({ type: "agent_waiting", agentId: "a", reason: "" });
+    await page.waitForTimeout(300);
+    const png2 = decode(await page.screenshot());
+    await page.waitForTimeout(150);
+    const png3 = decode(await page.screenshot());
+    const w2 = await where();
+    expect(w2.a.state).toBe("waiting");
+    expect({ ...w2, a: { x: w2.a.x, y: w2.a.y } }).toEqual({ ...w, a: { x: w.a.x, y: w.a.y } });
+    expect(changed(png2, png3, ...above), "no activity above the rack while waiting").toBe(0);
+    expect(white(png2, ...face) + white(png3, ...face), "no progress bar while waiting").toBe(0);
     expect(errors).toEqual([]);
   });
 });

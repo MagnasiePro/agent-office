@@ -299,62 +299,68 @@ export class Ambient {
       const anim = a.sprites.anims[a.anim];
       const frame = anim.frames[a.dir][frameAt(anim.spec, a.animTime)]!;
       const { anchor } = a.sprites.size;
-      const seed = a.id.length * 0.37;
-      // One pixel on the object (tile-local world units), hidden where the agent stands in front of it.
-      const dot = (lx: number, ly: number, z: number, c: string) => {
-        const w = worldToScreen(tile.x * UNIT + lx, tile.y * UNIT + ly, z);
-        const x = Math.floor(this.origin.x + w.x);
-        const y = Math.floor(this.origin.y + w.y);
-        if (frame.opaque(x - sx + anchor.x, y - sy + anchor.y)) return;
+      const seed = hash([...a.id].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 9973, 7));
+      // A w×h block of screen pixels at a tile-local world point, hidden where the agent stands in front of it.
+      const dot = (lx: number, ly: number, z: number, c: string, w = 1, h = 1) => {
+        const p = worldToScreen(tile.x * UNIT + lx, tile.y * UNIT + ly, z);
+        const x0 = Math.floor(this.origin.x + p.x);
+        const y0 = Math.floor(this.origin.y + p.y);
         ctx.fillStyle = c;
-        ctx.fillRect(x, y, 1, 1);
+        for (let y = y0; y < y0 + h; y++) {
+          for (let x = x0; x < x0 + w; x++) if (!frame.opaque(x - sx + anchor.x, y - sy + anchor.y)) ctx.fillRect(x, y, 1, 1);
+        }
       };
-      // Pixels rising `rise` units from z0 over `period` s, thinning out near the top.
-      const rising = (n: number, lx: number, ly: number, z0: number, rise: number, period: number, c: string) => {
+      // n w×w pixels rising `rise` units from z0 over `period` s, thinning out at the top.
+      const rising = (n: number, lx: number, ly: number, z0: number, rise: number, period: number, c: string, w = 1) => {
         for (let i = 0; i < n; i++) {
           const k = (t / period + i / n + seed) % 1;
-          if (bayer(i, Math.floor(k * 8)) > 1.1 - k) continue;
-          dot(lx + i * 3 + Math.round(Math.sin(t * 3 + i * 2)), ly, z0 + Math.floor(k * rise), c);
+          if (k > 0.75 && bayer(i, Math.floor(k * 8)) < (k - 0.75) * 4) continue; // thin out over the last quarter
+          dot(lx + i * 3 + Math.round(Math.sin(t * 3 + i * 2)), ly, z0 + Math.floor(k * rise), c, w, w);
         }
       };
       switch (a.station) {
         case "desk": {
-          // Monitor screen (+y face at ly 6): three code rows flicker cream / mint at ~6 Hz, two sparks above.
-          const tick = Math.floor(t * 6);
-          [6, 4, 8].forEach((len, r) => {
-            const c = (tick + r) % 2 ? pal.cream : pal.mint1;
-            for (let i = 0; i < len; i++) dot(3 + i, 6, 27 - r * 2, c);
-          });
-          rising(2, 5, 6, 30, 8, 1.1, pal.butter);
+          // The whole monitor face (+y face at ly 6) flashes white with dark text, then dark with a white cursor.
+          const on = Math.floor(t * 3 + seed * 3) % 2 === 0;
+          for (let z = 20; z < 28; z++) {
+            const text = on && z % 3 === 1;
+            for (let lx = 2; lx < 14; lx++) dot(lx, 6, z, on ? (text && lx > 2 && lx < 4 + ((z * 5) % 8) ? pal.ink : pal.white) : z === 22 && lx < 4 ? pal.white : pal.ink);
+          }
+          rising(2, 5, 6, 30, 10, 1.1, pal.butter, 2);
           break;
         }
         case "library": {
-          // One spine on the top shelf glows butter; a page flutters in front of the shelf.
-          for (let z = 36; z < 42; z++) for (let lx = 12; lx < 14; lx++) dot(lx, 12, z, z === 41 && Math.floor(t * 2) % 2 ? pal.white : pal.butter);
-          for (let i = 0; i < 2; i++) {
-            const f = Math.floor(t * 5 + i * 3) % 4;
-            dot(4 + i * 2 + (f % 2), 14, 30 + i * 3 + (f >> 1), pal.cream);
+          // An open white book with a butter glow, pulled out past the shelf edge; pages arc off it toward the reader.
+          const lift = Math.floor(t * 2 + seed * 2) % 2;
+          dot(9, 16, 37 + lift, pal.butter, 8, 6);
+          dot(9, 16, 36 + lift, pal.white, 6, 4);
+          dot(9, 16, 36 + lift, pal.ink, 1, 1);
+          dot(12, 16, 36 + lift, pal.ink, 1, 4); // the fold
+          for (let i = 0; i < 3; i++) {
+            const k = (t * 0.9 + i / 3 + seed) % 1;
+            dot(12 - k * 6, 17 + k * 6, 40 + Math.sin(k * Math.PI) * 10 - k * 8, pal.white, 2, 1);
           }
           break;
         }
         case "terminal": {
-          // Rack face (+x face at lx 13): six LEDs blinking fast, each on its own phase; bits rising off the top.
-          for (let i = 0; i < 6; i++) {
-            if (Math.sin(t * 13 + i * 2.3 + seed) < 0) continue;
-            dot(13, i % 2 ? 13 : 7, 9 + Math.floor(i / 2) * 6, i % 3 ? pal.mint1 : pal.red);
-          }
+          // A white 2 px progress bar filling up the rack face (+x face at lx 13), bits rising off the top.
+          const fill = 2 + Math.floor(((t / 1.2 + seed) % 1) * 24);
+          for (let z = 4; z < 4 + fill; z += 2) dot(13, 13, z + 1, pal.white, 2, 2);
           rising(2, 7, 7, 48, 10, 0.9, pal.mint1);
           break;
         }
         case "whiteboard": {
-          // A marker dot drawing a short wavy stroke on the board (+x face at lx 6), then starting over.
-          const n = Math.floor(((t / 1.6 + seed) % 1) * 9);
-          for (let i = 0; i <= n; i++) dot(6, 3 + i, 24 + (i % 4 === 1 ? 1 : i % 4 === 3 ? -1 : 0), i === n ? pal.ink : pal.sky1);
+          // A green marker (2×4, ink tip) drawing a thick wavy green stroke on the board (+x face at lx 6), then starting over.
+          const n = Math.floor(((t / 2 + seed) % 1) * 13);
+          const wave = (i: number) => 37 + (i % 4 === 1 ? 1 : i % 4 === 3 ? -1 : 0);
+          for (let i = 0; i <= n; i++) dot(6, 2 + i, wave(i), pal.leaf1, 1, 2);
+          dot(8, 2 + n, wave(n) + 4, pal.leaf0, 2, 3);
+          dot(8, 2 + n, wave(n) + 1, pal.ink, 2, 1);
           break;
         }
         case "coffee": {
-          // Steam over the machine, and a cup in the agent's hand with its own wisps.
-          rising(3, 6, 6, 29, 12, 1.4, pal.cream);
+          // Thick steam rising high over the machine, and a cup in the agent's hand with its own wisps.
+          rising(4, 4, 6, 30, 24, 1.8, pal.white, 2);
           const h = a.sprites.size.head;
           // Held at the side so it sticks out past the body: white mug, dark coffee in the rim.
           const cx = sx + (a.mini ? 4 : 7);
