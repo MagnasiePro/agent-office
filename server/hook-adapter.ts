@@ -8,9 +8,10 @@ import { parseEvent, type AgentEvent } from "../shared/events";
  * | SessionStart      | agent_spawn (session agent)                                            |
  * | UserPromptSubmit  | agent_spawn if the session is new                                      |
  * | PreToolUse        | agent_tool; for Task/Agent also agent_spawn of a sub-agent             |
+ * |                   | AskUserQuestion / ExitPlanMode → agent_waiting need input (no agent_tool) |
  * | PostToolUse(…)    | resumes work after a permission prompt; Task/Agent: closes sub-agent   |
  * | PermissionRequest | agent_waiting ("!" bubble)                                             |
- * | Notification      | agent_waiting; idle_prompt → need "input" ("?" bubble), else "!"       |
+ * | Notification      | agent_waiting; idle_prompt → need "next_prompt" ("?"), else "!"       |
  * | Stop, StopFailure | agent_done                                                             |
  * | SubagentStart     | binds the sub-agent's `agent_id` (spawns one if no Task call announced it) |
  * | SubagentStop      | agent_done + agent_despawn of that sub-agent (by agent_id, else latest)|
@@ -36,6 +37,8 @@ export interface HookPayload {
 }
 
 const SUBAGENT_TOOLS = new Set(["Task", "Agent"]);
+/** Tools that block on the user: shown as a real question, resumed by their PostToolUse. */
+const QUESTION_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 interface Session {
   /** Sub-agents currently alive: screen id, the Task call that announced it, the hook agent_id once known. */
@@ -79,6 +82,11 @@ export class HookAdapter {
         break;
       case "PreToolUse": {
         if (!p.tool_name) break;
+        if (QUESTION_TOOLS.has(p.tool_name)) {
+          session.waiting.add(actor);
+          out.push({ type: "agent_waiting", agentId: actor, need: "input", reason: summarize(p.tool_input) });
+          break;
+        }
         out.push({ type: "agent_tool", agentId: actor, tool: p.tool_name, summary: summarize(p.tool_input) });
         if (SUBAGENT_TOOLS.has(p.tool_name)) {
           const childId = `${main}/${p.tool_use_id ?? `sub-${++session.count}`}`;
@@ -115,7 +123,7 @@ export class HookAdapter {
       case "PermissionRequest":
       case "Notification":
         session.waiting.add(actor);
-        out.push({ type: "agent_waiting", agentId: actor, reason: p.message?.slice(0, 200), ...(p.notification_type === "idle_prompt" ? { need: "input" as const } : {}) });
+        out.push({ type: "agent_waiting", agentId: actor, reason: p.message?.slice(0, 200), ...(p.notification_type === "idle_prompt" ? { need: "next_prompt" as const } : {}) });
         break;
       case "Stop":
       case "StopFailure":

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEvent, parseServerMessage } from "../../shared/events";
+import { parseEvent, parseServerMessage, parseUsage } from "../../shared/events";
 import { randomScenario, scriptedScenario } from "../../shared/scenario";
 import { animationForStation, stationForTool } from "../../shared/toolMapping";
 import { HookAdapter, summarize } from "../../server/hook-adapter";
@@ -27,6 +27,13 @@ describe("event contract (zod)", () => {
     expect(parseServerMessage(s)).toEqual(s);
   });
 
+  it("parses usage messages and rejects out-of-range values", () => {
+    expect(parseServerMessage({ type: "usage", fiveHour: { usedPercentage: 62, resetsAt: 1762300000 } })).toBeTruthy();
+    expect(parseUsage({ type: "usage", fiveHour: { usedPercentage: 140, resetsAt: 1 } })).toBeNull();
+    expect(parseUsage({ type: "usage", sevenDay: { usedPercentage: "5", resetsAt: 1 } })).toBeNull();
+    expect(parseUsage({ type: "usage" })).toBeTruthy();
+  });
+
   it("scenarios only produce valid events, in time order", () => {
     const scripted = scriptedScenario("m");
     for (const t of scripted) expect(parseEvent(t.event)).not.toBeNull();
@@ -46,17 +53,19 @@ describe("tool → station mapping", () => {
     ["Edit", "desk"],
     ["Write", "desk"],
     ["Bash", "terminal"],
-    ["Task", "whiteboard"],
-    ["Agent", "whiteboard"],
-    ["WebFetch", "window"],
-    ["WebSearch", "window"],
-    ["mcp__github__create_issue", "window"],
+    ["Task", "coffee"],
+    ["Agent", "coffee"],
+    ["WebFetch", "library"],
+    ["WebSearch", "library"],
+    ["mcp__github__create_issue", "library"],
+    ["ExitPlanMode", "desk"],
     ["SomethingNew", "desk"],
   ])("%s → %s", (tool, station) => expect(stationForTool(tool)).toBe(station));
 
   it("gives each station a work animation", () => {
     expect(animationForStation("library")).toBe("work_read");
     expect(animationForStation("terminal")).toBe("work_terminal");
+    expect(animationForStation("coffee")).toBe("idle");
     expect(animationForStation("unknown")).toBe("work_type");
   });
 });
@@ -96,7 +105,7 @@ describe("hook adapter", () => {
     expect(h.handle({ hook_event_name: "SubagentStart", session_id: s, agent_id: "ag1", agent_type: "Explore" })).toEqual([]);
     expect(h.handle({ hook_event_name: "PreToolUse", session_id: s, agent_id: "ag1", tool_name: "Read" })).toEqual([{ type: "agent_tool", agentId: `${s}/tu9`, tool: "Read", summary: undefined }]);
     expect(h.handle({ hook_event_name: "Notification", session_id: s, notification_type: "idle_prompt", message: "Claude is waiting for your input" })).toEqual([
-      { type: "agent_waiting", agentId: s, reason: "Claude is waiting for your input", need: "input" },
+      { type: "agent_waiting", agentId: s, reason: "Claude is waiting for your input", need: "next_prompt" },
     ]);
     expect(h.handle({ hook_event_name: "UserPromptSubmit", session_id: s })).toEqual([{ type: "agent_tool", agentId: s, tool: "UserPromptSubmit" }]);
     expect(h.handle({ hook_event_name: "PermissionRequest", session_id: s, tool_name: "Bash" })).toEqual([{ type: "agent_waiting", agentId: s, reason: undefined }]);
@@ -109,6 +118,18 @@ describe("hook adapter", () => {
     ]);
     // PostToolUse of the Task after SubagentStop does not close anything twice.
     expect(h.handle({ hook_event_name: "PostToolUse", session_id: s, tool_name: "Task", tool_use_id: "tu9" })).toEqual([]);
+  });
+
+  it("maps idle_prompt to next_prompt", () => {
+    expect(new HookAdapter().handle({ hook_event_name: "Notification", session_id: "s", notification_type: "idle_prompt" })).toContainEqual({ type: "agent_waiting", agentId: "s", need: "next_prompt" });
+  });
+
+  it("turns AskUserQuestion and ExitPlanMode into an input wait, resumed by PostToolUse", () => {
+    const h = new HookAdapter();
+    const pre = h.handle({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", session_id: "s" });
+    expect(pre).toContainEqual({ type: "agent_waiting", agentId: "s", need: "input" });
+    expect(pre.some((e) => e.type === "agent_tool")).toBe(false);
+    expect(h.handle({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", session_id: "s" })).toContainEqual({ type: "agent_tool", agentId: "s", tool: "AskUserQuestion" });
   });
 
   it("passes AgentEvents through and ignores junk", () => {

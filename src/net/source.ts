@@ -31,7 +31,7 @@ export function connectWs(url: string, sink: EventSink): () => void {
       const msg = parseServerMessage(raw);
       if (!msg) return console.warn("[agent-office] ignored invalid message", raw);
       if (msg.type === "snapshot") sink.snapshot(msg);
-      else sink.event(msg);
+      else if (msg.type !== "usage") sink.event(msg); // usage is wired in a later task
     };
     ws.onclose = () => {
       sink.status?.("closed");

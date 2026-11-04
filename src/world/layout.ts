@@ -15,7 +15,7 @@ import {
 } from "./furniture";
 
 /** Station types an agent can go to. Tools are mapped to these in shared/tool-stations.json. */
-export type StationType = "desk" | "library" | "terminal" | "whiteboard" | "window" | "cafe" | "mailbox";
+export type StationType = "desk" | "library" | "terminal" | "whiteboard" | "window" | "coffee" | "cafe" | "mailbox";
 
 export interface Placement {
   def: FurnitureDef;
