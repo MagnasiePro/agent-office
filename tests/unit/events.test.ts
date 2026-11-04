@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEvent, parseServerMessage, parseUsage, SnapshotSchema, type Usage } from "../../shared/events";
+import { parseEvent, parseServerMessage, parseUsage, parseUsageUpdate, SnapshotSchema, type Usage } from "../../shared/events";
 import { randomScenario, scriptedScenario } from "../../shared/scenario";
 import { animationForStation, stationForTool } from "../../shared/toolMapping";
 import { HookAdapter, summarize } from "../../server/hook-adapter";
@@ -159,5 +159,10 @@ describe("server tracker", () => {
     t.usage = u;
     expect(t.snapshot().usage).toEqual(u);
     expect(SnapshotSchema.safeParse(t.snapshot()).success).toBe(true);
+  });
+
+  it("parseUsageUpdate accepts one window and rejects junk", () => {
+    expect(parseUsageUpdate({ fiveHour: { usedPercentage: 40, resetsAt: 1893456000 } })?.type).toBe("usage");
+    for (const bad of [{}, [], "x", null, { fiveHour: { usedPercentage: 140, resetsAt: 1 } }, { sevenDay: { usedPercentage: "5", resetsAt: 1 } }]) expect(parseUsageUpdate(bad)).toBeNull();
   });
 });

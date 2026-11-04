@@ -2,7 +2,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { parseEvent, parseUsage, type AgentEvent, type Usage } from "../shared/events";
+import { parseEvent, parseUsageUpdate, type AgentEvent, type Usage } from "../shared/events";
 import { play, randomScenario, scriptedScenario } from "../shared/scenario";
 import { HookAdapter } from "./hook-adapter";
 import { AgentTracker } from "./tracker";
@@ -115,7 +115,7 @@ async function api(req: IncomingMessage, res: ServerResponse): Promise<boolean> 
       json(res, 400, { error: "invalid JSON" });
       return true;
     }
-    const usage = parseUsage(typeof body === "object" && body ? { ...body, type: "usage" } : body);
+    const usage = parseUsageUpdate(body);
     if (!usage) {
       json(res, 400, { error: "invalid usage" });
       return true;

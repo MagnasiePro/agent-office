@@ -65,3 +65,10 @@ export function parseUsage(raw: unknown): Usage | null {
   const r = UsageSchema.safeParse(raw);
   return r.success ? r.data : null;
 }
+
+/** Body of `POST /usage`: a plain object carrying at least one window (`type` is added here). */
+export function parseUsageUpdate(raw: unknown): Usage | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const u = parseUsage({ ...raw, type: "usage" });
+  return u && (u.fiveHour || u.sevenDay) ? u : null;
+}
