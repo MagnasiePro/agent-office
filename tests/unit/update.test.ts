@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkUpdate, compareVersions, fetchLatest, parseRelease } from "../../scripts/update.mjs";
+import { agentRoot, checkUpdate, compareVersions, fetchLatest, parseRelease, preflight, saverChanged } from "../../scripts/update.mjs";
 
 const fakeOk = (tag: string) => (async () => ({ ok: true, status: 200, json: async () => ({ tag_name: tag, html_url: "https://x" }) })) as unknown as typeof fetch;
 const fakeStatus = (status: number) => (async () => ({ ok: false, status, json: async () => ({}) })) as unknown as typeof fetch;
@@ -45,5 +45,51 @@ describe("checkUpdate", () => {
   });
   it("is quiet when GitHub is unreachable", async () => {
     expect(await checkUpdate("0.1.0", fakeThrow)).toEqual({ current: "0.1.0", latest: null, available: false, url: null });
+  });
+});
+
+/** Fake git: answers by joined args; unknown commands succeed with empty output. */
+const fakeGit = (answers: Record<string, { code?: number; out?: string }>) => (args: string[]) => ({ code: 0, out: "", ...answers[args.join(" ")] });
+const clean = {
+  "rev-parse --is-inside-work-tree": { out: "true" },
+  "rev-parse --abbrev-ref HEAD": { out: "main" },
+  "status --porcelain": { out: "" },
+  "merge-base --is-ancestor v0.3.0 HEAD": { code: 1 },
+  "merge-base --is-ancestor HEAD v0.3.0": { code: 0 },
+};
+
+describe("preflight", () => {
+  it("lets a clean main that can fast-forward through", () => {
+    expect(preflight(fakeGit(clean), "v0.3.0")).toBeNull();
+  });
+  it("refuses outside a git checkout", () => {
+    expect(preflight(fakeGit({ ...clean, "rev-parse --is-inside-work-tree": { code: 128 } }), "v0.3.0")).toMatch(/not a git checkout/);
+  });
+  it("refuses a feature branch or a detached HEAD", () => {
+    expect(preflight(fakeGit({ ...clean, "rev-parse --abbrev-ref HEAD": { out: "feat/x" } }), "v0.3.0")).toMatch(/main/);
+    expect(preflight(fakeGit({ ...clean, "rev-parse --abbrev-ref HEAD": { out: "HEAD" } }), "v0.3.0")).toMatch(/main/);
+  });
+  it("refuses uncommitted changes", () => {
+    expect(preflight(fakeGit({ ...clean, "status --porcelain": { out: " M src/main.ts" } }), "v0.3.0")).toMatch(/uncommitted/);
+  });
+  it("says when the release is already in", () => {
+    expect(preflight(fakeGit({ ...clean, "merge-base --is-ancestor v0.3.0 HEAD": { code: 0 } }), "v0.3.0")).toMatch(/up to date/);
+  });
+  it("refuses a branch that diverged from the release", () => {
+    expect(preflight(fakeGit({ ...clean, "merge-base --is-ancestor HEAD v0.3.0": { code: 1 } }), "v0.3.0")).toMatch(/diverged/);
+  });
+});
+
+describe("agentRoot", () => {
+  it("reads the LaunchAgent working directory", () => {
+    expect(agentRoot("<dict><key>Label</key><string>x</string><key>WorkingDirectory</key><string>/a/b</string></dict>")).toBe("/a/b");
+    expect(agentRoot("<dict></dict>")).toBeNull();
+  });
+});
+
+describe("saverChanged", () => {
+  it("is true only when the release touches saver/", () => {
+    expect(saverChanged(fakeGit({ "diff --name-only abc v0.3.0 -- saver/": { out: "saver/lock/x.swift" } }), "abc", "v0.3.0")).toBe(true);
+    expect(saverChanged(fakeGit({}), "abc", "v0.3.0")).toBe(false);
   });
 });
