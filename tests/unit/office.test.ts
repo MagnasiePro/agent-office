@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { AgentEvent } from "../../shared/events";
 import { createRegistry } from "../../src/characters";
+import { distanceMap } from "../../src/engine/pathfinding";
 import { Office } from "../../src/scene/office";
 import { OFFICE, wallBetween } from "../../src/world/layout";
 
@@ -309,3 +310,99 @@ describe("agent status visibility", () => {
     expect(agent("a").station).toBeNull();
   });
 });
+
+describe("mail truck errands", () => {
+  const mailSlot = () => slotOf("mailbox")[0]!;
+  const atSlot = (id: string) => Math.floor(agent(id).x) === mailSlot().x && Math.floor(agent(id).y) === mailSlot().y;
+  /** Steps the simulation until `done` holds (or `limit` seconds pass); returns whether it held. */
+  const until = (done: () => boolean, limit: number) => {
+    for (let t = 0; t < limit; t += 1 / 30) {
+      if (done()) return true;
+      office.update(1 / 30);
+    }
+    return done();
+  };
+  const atDesk = (id: string) => {
+    apply({ type: "agent_spawn", agentId: id, kind: "claude" }, { type: "agent_tool", agentId: id, tool: "Edit" });
+    run(15);
+    expect(agent(id).station).toBe("desk");
+  };
+
+  it("there is one mailbox, at the front of the open space, reachable from the spawn", () => {
+    expect(OFFICE.furniture.filter((f) => f.def.id === "mailbox").map(({ x, y }) => ({ x, y }))).toEqual([{ x: 11, y: 8 }]);
+    expect(slotOf("mailbox")).toEqual([{ x: 11, y: 7, dir: "SE" }]);
+    const dist = distanceMap(office.grid, OFFICE.spawn);
+    expect(dist[mailSlot().y * office.grid.w + mailSlot().x]).toBeGreaterThan(0);
+  });
+
+  it("a push sends the agent to post a letter, then the truck picks it up", () => {
+    atDesk("a");
+    apply({ type: "agent_mail", agentId: "a", direction: "push" });
+    expect(agent("a").carrying).toBe("letter");
+    expect(until(() => atSlot("a") && agent("a").state === "working", 15)).toBe(true);
+    expect(agent("a").carrying).toBe("letter");
+    expect(agent("a").station).toBe("mailbox");
+    expect(until(() => office.mail.box.outgoing === 1, 2)).toBe(true);
+    expect(agent("a").carrying).toBeNull();
+    expect(until(() => office.mail.truck.state === "stopped", 15)).toBe(true);
+    expect(until(() => office.mail.box.outgoing === 0, 2)).toBe(true);
+    expect(until(() => office.mail.truck.state === "away", 30)).toBe(true);
+    expect(office.mail.flagUp).toBe(false);
+  });
+
+  it("a pull brings the truck first, then the agent collects", () => {
+    atDesk("a");
+    apply({ type: "agent_mail", agentId: "a", direction: "pull" });
+    let stoppedFirst = false;
+    expect(
+      until(() => {
+        if (office.mail.truck.state === "stopped" && !atSlot("a")) stoppedFirst = true;
+        return atSlot("a");
+      }, 30),
+    ).toBe(true);
+    expect(stoppedFirst).toBe(true);
+    expect(until(() => agent("a").carrying === "letter", 2)).toBe(true);
+    expect(office.mail.box.incoming).toEqual([]);
+    expect(office.mail.flagUp).toBe(false);
+    run(3.5);
+    expect(agent("a").carrying).toBeNull();
+  });
+
+  it("events during an errand are replayed afterwards", () => {
+    atDesk("a");
+    apply({ type: "agent_mail", agentId: "a", direction: "push" });
+    run(1);
+    apply({ type: "agent_tool", agentId: "a", tool: "Bash" });
+    expect(until(() => office.mail.box.outgoing === 1, 15)).toBe(true);
+    run(15);
+    expect(agent("a").state).toBe("working");
+    expect(agent("a").station).toBe("terminal");
+    expect(slotOf("terminal")).toContainEqual(expect.objectContaining({ x: Math.floor(agent("a").x), y: Math.floor(agent("a").y) }));
+  });
+
+  it("goes back to its work after its errands when nothing else came in", () => {
+    atDesk("a");
+    const seat = `${agent("a").x},${agent("a").y}`;
+    apply({ type: "agent_mail", agentId: "a", direction: "push" }, { type: "agent_mail", agentId: "a", direction: "pull" });
+    run(1);
+    apply({ type: "agent_mail", agentId: "a", direction: "push" });
+    expect(until(() => office.mail.box.outgoing === 2, 15)).toBe(true);
+    run(30);
+    expect(office.mail.box.incoming).toEqual([]);
+    expect(agent("a").station).toBe("desk");
+    expect(`${agent("a").x},${agent("a").y}`).toBe(seat);
+  });
+
+  it("despawn mid-errand drops its letter", () => {
+    atDesk("a");
+    apply({ type: "agent_mail", agentId: "a", direction: "pull" });
+    expect(until(() => office.mail.box.incoming.includes("a"), 30)).toBe(true);
+    expect(atSlot("a")).toBe(false);
+    apply({ type: "agent_despawn", agentId: "a" });
+    expect(office.mail.box.incoming).toEqual([]);
+    expect(office.mail.flagUp).toBe(false);
+    run(3);
+    expect(office.agents.has("a")).toBe(false);
+  });
+});
+

@@ -38,6 +38,8 @@ export class Agent {
   awaitingPrompt = false;
   /** What a waiting agent needs from the user: an approval (red beacon) or an answer (blue beacon). */
   waitNeed: "permission" | "input" = "permission";
+  /** What the agent holds in its hand (drawn by the overlay). */
+  carrying: "letter" | null = null;
   anim: AnimName = "spawn";
   animTime = 0;
   /** Seconds left before the current timed state ends (spawn, done, idle pause…). */

@@ -184,20 +184,15 @@ export const MAILBOX: FurnitureDef = {
   id: "mailbox",
   name: "Boîte aux lettres",
   footprint: { w: 1, d: 1 },
-  frames: 2,
+  frames: 1,
   fps: 1,
   outline: true,
-  draw(p, pal, f) {
+  draw(p, pal) {
     p.box(6, 6, 0, 3, 3, 12, { top: pal.wood2, left: pal.wood1, right: pal.wood0 });
     p.box(2, 3, 12, 11, 9, 8, { top: pal.red, left: pal.red, right: pal.coral0, edge: pal.blush });
     p.planeX(13.01, 5, 10, 15, 17, () => pal.ink); // slot
-    // Flag: up when there is mail (frame 1).
-    if (f === 1) {
-      p.box(4, 12, 18, 1, 1, 8, { top: pal.wood1, left: pal.wood1, right: pal.wood0 });
-      p.box(4, 12, 23, 1, 5, 3, { top: pal.butter, left: pal.butter, right: pal.coral1 });
-    } else {
-      p.box(4, 12, 15, 1, 6, 1, { top: pal.butter, left: pal.butter, right: pal.coral1 });
-    }
+    // Flag down; the overlay draws it up while the mailbox holds mail.
+    p.box(4, 12, 15, 1, 6, 1, { top: pal.butter, left: pal.butter, right: pal.coral1 });
   },
 };
 

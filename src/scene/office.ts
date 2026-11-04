@@ -7,12 +7,21 @@ import { Agent, directionOf, towardViewer } from "../engine/agent";
 import { distanceMap, findPath, walkable, type Grid, type Tile } from "../engine/pathfinding";
 import { isFloor, obstacles, wallBetween, type Slot, type WorldLayout } from "../world/layout";
 import type { Actor } from "./compose";
+import { MailService } from "./mail";
 
 interface Meta {
   isChild: boolean;
   children: number;
-  /** Events received while spawning, replayed afterwards. */
+  /** Events received while spawning or on an errand, replayed afterwards. */
   pending: AgentEvent[];
+  /** Mailbox errand in progress (it takes priority over the agent's other events). */
+  errand: "post" | "fetch" | null;
+  /** Simulation time at which a letter being posted drops into the mailbox. */
+  postAt: number | null;
+  /** Simulation time at which a collected letter is put away. */
+  carryUntil: number | null;
+  /** Last tool or waiting event (null once done): redone after an errand if nothing else came in. */
+  last: AgentEvent | null;
   /** True after agent_done until the next tool/waiting event (makes double "done" harmless). */
   finished: boolean;
   returnThenDespawn: boolean;
@@ -44,6 +53,9 @@ export interface Speech {
 const LINE = 1.9;
 const GAP = 0.35;
 const FRONT: Direction[] = ["SE", "SW"];
+/** Seconds spent posting a letter, and carrying a collected one. */
+const POST_TIME = 0.6;
+const CARRY_TIME = 3;
 
 /**
  * The simulation: turns AgentEvents into agent behaviour (stations, wandering, sub-agent life cycle).
@@ -64,6 +76,7 @@ export class Office {
   private speechSeed = 0;
   private rng: () => number;
   private tools: ToolStationConfig;
+  readonly mail: MailService;
 
   constructor(
     readonly layout: WorldLayout,
@@ -79,15 +92,17 @@ export class Office {
     };
     this.rng = opts.rng ?? Math.random;
     this.tools = opts.toolConfig ?? DEFAULT_TOOL_CONFIG;
+    this.mail = new MailService(layout.truckLane);
+    this.mail.onDelivered = (id) => this.fetchLetter(id);
   }
 
   // ── Events ────────────────────────────────────────────────────────────────
 
   apply(e: AgentEvent): void {
     if (e.type === "agent_spawn") return this.spawn(e.agentId, e.kind, e.parentId, e.label);
-    if (e.type === "agent_mail") return; // the mail truck arrives with a later task
     let a = this.agents.get(e.agentId);
     if (!a) {
+      if (e.type === "agent_mail") return;
       // Unknown agent: tools/waiting implicitly create it; done/despawn are ignored.
       if (e.type === "agent_done" || e.type === "agent_despawn") return;
       this.spawn(e.agentId, "claude");
@@ -95,13 +110,24 @@ export class Office {
     }
     const m = this.meta.get(a.id)!;
     if (a.state === "despawning" || a.state === "gone") return;
-    if (a.state === "spawning") {
+    if (a.state === "spawning" || (m.errand && e.type !== "agent_despawn")) {
       m.pending.push(e);
       return;
+    }
+    if (e.type === "agent_mail") {
+      if (this.leaving(m)) return;
+      if (e.direction === "push") this.startErrand(a, "post");
+      else this.mail.requestDelivery(a.id);
+      return;
+    }
+    if (m.carryUntil !== null) {
+      m.carryUntil = null;
+      a.carrying = null;
     }
     if (!(e.type === "agent_waiting" && e.need === "next_prompt")) a.restTime = 0;
     switch (e.type) {
       case "agent_tool": {
+        m.last = e;
         a.awaitingPrompt = false;
         m.finished = false;
         m.returnThenDespawn = false;
@@ -116,6 +142,7 @@ export class Office {
           a.awaitingPrompt = true;
           break;
         }
+        m.last = e;
         a.awaitingPrompt = false;
         m.finished = false;
         this.release(a);
@@ -129,6 +156,7 @@ export class Office {
       case "agent_done":
         if (m.finished) return;
         m.finished = true;
+        m.last = null;
         this.release(a);
         a.state = "done";
         a.timer = Infinity;
@@ -178,12 +206,16 @@ export class Office {
     const a = new Agent(id, kind, sprites, tile, parentId, label);
     a.dir = parent ? towardViewer(parent.dir) : "SE";
     this.agents.set(id, a);
-    this.meta.set(id, { isChild, children: 0, pending: [], finished: false, returnThenDespawn: false, despawnAt: null, home: isChild ? null : this.claimHome(id) });
+    this.meta.set(id, { isChild, children: 0, pending: [], errand: null, postAt: null, carryUntil: null, last: null, finished: false, returnThenDespawn: false, despawnAt: null, home: isChild ? null : this.claimHome(id) });
     this.reserved.set(tkey(tile), id);
   }
 
   private despawn(a: Agent, force = false): void {
     const m = this.meta.get(a.id)!;
+    // A despawn cancels the errand, and a letter nobody will collect leaves the mailbox.
+    Object.assign(m, { errand: null, postAt: null, carryUntil: null });
+    a.carrying = null;
+    while (this.mail.takeLetter(a.id));
     const parent = a.parentId ? this.agents.get(a.parentId) : undefined;
     if (!force && m.isChild && parent && parent.state !== "despawning" && Math.hypot(parent.x - a.x, parent.y - a.y) > 1.6) {
       m.returnThenDespawn = true;
@@ -205,6 +237,7 @@ export class Office {
 
   update(dt: number): void {
     this.time += dt;
+    this.mail.update(dt);
     this.speechQueue = this.speechQueue.filter((s) => s.end > this.time && this.agents.has(s.agentId));
     for (const a of this.agents.values()) {
       a.update(dt);
@@ -214,14 +247,24 @@ export class Office {
         this.despawn(a, true);
         continue;
       }
+      if (m.postAt !== null && this.time >= m.postAt) {
+        m.postAt = null;
+        this.mail.post();
+        a.carrying = null;
+        this.mail.requestPickup();
+        this.endErrand(a);
+      }
+      if (m.carryUntil !== null && this.time >= m.carryUntil) {
+        m.carryUntil = null;
+        a.carrying = null;
+      }
       switch (a.state) {
         case "spawning":
           if (a.timer === 0) {
             this.enterIdle(a, 0.4 + this.rng());
             // A new sub-agent gets briefed by its parent.
             if (a.parentId && this.agents.has(a.parentId)) this.converse(a.parentId, a.id, 2);
-            const queued = m.pending.splice(0);
-            for (const e of queued) this.apply(e);
+            this.resumeAfterBusy(a);
           }
           break;
         case "done":
@@ -313,7 +356,64 @@ export class Office {
     });
   }
 
-  private goToStation(a: Agent, station: string, anim: AnimName): void {
+  // ── Mailbox errands ───────────────────────────────────────────────────────
+
+  /** A session or sub-agent on its way out (returning to say goodbye, or about to vanish) runs no errands. */
+  private leaving(m: Meta): boolean {
+    return m.returnThenDespawn || m.despawnAt !== null;
+  }
+
+  /** Walks to the mailbox to post a letter, or to collect one the truck dropped. */
+  private startErrand(a: Agent, kind: "post" | "fetch"): void {
+    const m = this.meta.get(a.id)!;
+    m.errand = kind;
+    m.carryUntil = null;
+    a.carrying = kind === "post" ? "letter" : null;
+    const mailbox = animationForStation("mailbox", this.tools);
+    this.goToStation(a, "mailbox", (ANIM_NAMES as readonly string[]).includes(mailbox) ? (mailbox as AnimName) : "work_read", () => {
+      if (kind === "post") {
+        m.postAt = this.time + POST_TIME;
+        return;
+      }
+      this.mail.takeLetter(a.id);
+      this.endErrand(a);
+      a.carrying = "letter";
+      m.carryUntil = this.time + CARRY_TIME;
+    });
+  }
+
+  /** The truck dropped a letter for this agent: it collects it now, or once it is free. */
+  private fetchLetter(id: string): void {
+    const a = this.agents.get(id);
+    const m = this.meta.get(id);
+    if (!a || !m || a.state === "despawning" || a.state === "gone" || this.leaving(m)) {
+      this.mail.takeLetter(id);
+      return;
+    }
+    if (a.state !== "spawning" && !m.errand) this.startErrand(a, "fetch");
+  }
+
+  private endErrand(a: Agent): void {
+    const m = this.meta.get(a.id)!;
+    m.errand = null;
+    if (this.resumeAfterBusy(a)) return;
+    if (m.last) this.apply(m.last);
+    else this.enterIdle(a, 1 + this.rng() * 2);
+  }
+
+  /** After spawning or an errand: collect a waiting letter first, else replay queued events. False when there was nothing to do. */
+  private resumeAfterBusy(a: Agent): boolean {
+    const m = this.meta.get(a.id)!;
+    if (this.mail.box.incoming.includes(a.id)) {
+      this.startErrand(a, "fetch");
+      return true;
+    }
+    const queued = m.pending.splice(0);
+    for (const e of queued) this.apply(e);
+    return queued.length > 0;
+  }
+
+  private goToStation(a: Agent, station: string, anim: AnimName, then?: () => void): void {
     this.release(a);
     // When every slot is taken, queue up on the closest free tile next to the station.
     const anchor = this.layout.stations.find((s) => s.type === station)?.slots[0];
@@ -328,6 +428,7 @@ export class Office {
       a.station = station;
       if (facing) a.dir = facing;
       a.setAnim(anim);
+      then?.();
     });
   }
 
