@@ -1,5 +1,5 @@
 import type { Bitmap } from "../engine/bitmap";
-import { drawAlertBubble, drawAskBubble, drawSleepZ, drawSparkle } from "../engine/emotes";
+import { drawSleepZ, drawSparkle } from "../engine/emotes";
 import { Mask, paintMatrix, paintShape } from "../engine/shape";
 import { poseFor, STANDARD_ANIMATIONS, type Pose } from "./pose";
 import type { CharacterDefinition, DrawContext, SizeSpec } from "./types";
@@ -61,7 +61,6 @@ function drawEyes(bmp: Bitmap, p: Record<string, string>, xs: readonly number[],
 
 function drawEmotes(bmp: Bitmap, pose: Pose, headX: number, headTop: number, ctx: DrawContext): void {
   const bx = headX + (ctx.size === "full" ? 6 : 4);
-  if (pose.bubble !== null) (pose.bubbleKind === "ask" ? drawAskBubble : drawAlertBubble)(bmp, bx, headTop - 2 + pose.bubble, ctx.size);
   if (pose.zzz !== null) drawSleepZ(bmp, bx - 2, headTop, pose.zzz, ctx.size);
   for (const [dx, dy, big] of pose.sparkles) {
     const k = ctx.size === "full" ? 1 : 0.6;

@@ -144,8 +144,9 @@ export class Ambient {
   /** Red "!" (permission) or blue "?" (a real question) for agents blocked on the user, else null. */
   private beacon(a: Agent): { main: string; glow: string; period: number; ask: boolean } | null {
     if (a.state !== "waiting") return null;
-    const ask = a.anim === "waiting_input";
-    return ask ? { main: this.pal.sky1, glow: this.pal.sky2, period: 1.8, ask } : { main: this.pal.red, glow: this.pal.coral1, period: 1.0, ask };
+    const ask = a.waitNeed === "input";
+    // sky2, not sky1: sky1 is the couch/rug colour and too dark to stand out.
+    return ask ? { main: this.pal.sky2, glow: this.pal.sky1, period: 1.8, ask } : { main: this.pal.red, glow: this.pal.coral1, period: 1.0, ask };
   }
 
   /** 0..1..0 once per period. */
@@ -189,7 +190,7 @@ export class Ambient {
 
   /** Beam canvases per agent frame (the beam skips the agent's own pixels so it reads as behind them). */
   private beamCache = new WeakMap<Bitmap, Map<string, HTMLCanvasElement>>();
-  private bigBubbles = new Map<boolean, HTMLCanvasElement>();
+  private bigBubbles = new Map<string, HTMLCanvasElement>();
   private askBubbles = new Map<SizeClass, HTMLCanvasElement>();
 
   /**
@@ -197,27 +198,20 @@ export class Ambient {
    * plus the small "?" over finished sessions that wait for their next prompt.
    */
   drawBeacons(ctx: CanvasRenderingContext2D, agents: Iterable<Agent>, t: number): void {
+    const big: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    const small: Agent[] = [];
     for (const a of agents) {
+      const b = this.beacon(a);
+      if (!b) {
+        if (a.awaitingPrompt && a.state !== "despawning" && a.state !== "gone") small.push(a);
+        continue;
+      }
       const s = gridToScreen(a.x, a.y, this.origin);
       const sx = Math.round(s.x);
       const sy = Math.round(s.y);
       const h = a.sprites.size.head;
-      const b = this.beacon(a);
-      if (!b) {
-        if (!a.awaitingPrompt || a.state === "despawning" || a.state === "gone") continue;
-        const size = a.sprites.variant.size;
-        let c = this.askBubbles.get(size);
-        if (!c) {
-          const bmp = new Bitmap(7, 11);
-          drawAskBubble(bmp, 3, 10, size);
-          c = toCanvas(bmp);
-          this.askBubbles.set(size, c);
-        }
-        ctx.drawImage(c, sx + h.x + 3, sy + h.y - 12); // tail just above the head, as the sprite drew it
-        continue;
-      }
       const k = Ambient.pulse(t, b.period);
-      const level = 2 + Math.round(k * 2); // 2..4 quarters of full density
+      const level = 3 + Math.round(k); // 3/4 or 4/4 of full density
       const anim = a.sprites.anims[a.anim];
       const frame = anim.frames[a.dir][frameAt(anim.spec, a.animTime)]!;
       const { anchor, shadow } = a.sprites.size;
@@ -229,28 +223,69 @@ export class Ambient {
       let beam = byFrame.get(key);
       if (!beam) {
         const bmp = new Bitmap(hw * 2 + 1, H);
+        const edgeW = a.mini ? 2 : 3;
         for (let y = 0; y < H; y++) {
-          const fade = Math.sqrt((y + 1) / H) * (level / 4); // 0 at the top, full at the feet
+          // Solid over the lower two thirds, dithering out over the top third.
+          const fade = Math.min(1, (y + 1) / (H / 3)) * (level / 4);
           for (let x = 0; x <= hw * 2; x++) {
             // Beam pixel in frame coordinates: the beam's bottom-centre sits on the anchor.
             if (frame.opaque(x - hw + anchor.x, y - H + 1 + anchor.y)) continue;
-            const edge = x <= 1 || x >= hw * 2 - 1;
-            if (bayer(x, y) < (edge ? 1 : 0.45) * fade) bmp.set(x, y, edge ? b.main : b.glow);
+            const d = bayer(x, y);
+            const fromEdge = Math.min(x, hw * 2 - x);
+            if (fromEdge < edgeW) {
+              if (d >= fade) continue;
+              // Blue gets a cream highlight on the inner edge column so it reads against dark floors.
+              bmp.set(x, y, b.ask && fromEdge === edgeW - 1 && d < fade * 0.5 ? this.pal.cream : b.main);
+            } else if (d < 0.6 * fade) bmp.set(x, y, d < 0.45 * fade ? b.main : b.glow);
           }
         }
         beam = toCanvas(bmp);
         byFrame.set(key, beam);
       }
       ctx.drawImage(beam, sx - hw, sy - H + 1);
-      let bubble = this.bigBubbles.get(b.ask);
-      if (!bubble) {
-        const bmp = new Bitmap(7, 11);
-        (b.ask ? drawAskBubble : drawAlertBubble)(bmp, 3, 10, "full");
-        bubble = toCanvas(bmp);
-        this.bigBubbles.set(b.ask, bubble);
-      }
+      const bubble = this.bigBubble(b.ask, b.main);
       const bob = Math.round(k * 2);
-      ctx.drawImage(bubble, sx + h.x - bubble.width, sy + h.y - 26 - bob, bubble.width * 2, bubble.height * 2);
+      const x = sx + h.x - bubble.width;
+      const y = sy + h.y - 28 - bob;
+      ctx.drawImage(bubble, x, y, bubble.width * 2, bubble.height * 2);
+      big.push({ x0: x, y0: y, x1: x + bubble.width * 2, y1: y + bubble.height * 2 });
     }
+    for (const a of small) {
+      const s = gridToScreen(a.x, a.y, this.origin);
+      const h = a.sprites.size.head;
+      const size = a.sprites.variant.size;
+      let c = this.askBubbles.get(size);
+      if (!c) {
+        const bmp = new Bitmap(7, 11);
+        drawAskBubble(bmp, 3, 10, size);
+        c = toCanvas(bmp);
+        this.askBubbles.set(size, c);
+      }
+      const x = Math.round(s.x) + h.x + 3;
+      const y = Math.round(s.y) + h.y - 12; // tail just above the head, as the sprite used to draw it
+      // A waiting agent's big bubble wins over a neighbour's small "?".
+      if (big.some((r) => x < r.x1 && x + c.width > r.x0 && y < r.y1 && y + c.height > r.y0)) continue;
+      ctx.drawImage(c, x, y);
+    }
+  }
+
+  /** Full-size "!" or "?" bubble with a 1 px frame in the beacon colour, cached. */
+  private bigBubble(ask: boolean, color: string): HTMLCanvasElement {
+    const key = `${ask}|${color}`;
+    let c = this.bigBubbles.get(key);
+    if (!c) {
+      const inner = new Bitmap(7, 11);
+      (ask ? drawAskBubble : drawAlertBubble)(inner, 3, 10, "full");
+      const bmp = new Bitmap(9, 13);
+      bmp.blit(inner, 1, 1);
+      for (let y = 0; y < 13; y++) {
+        for (let x = 0; x < 9; x++) {
+          if (!bmp.opaque(x, y) && (inner.opaque(x - 1, y - 1) || inner.opaque(x - 2, y - 1) || inner.opaque(x, y - 1) || inner.opaque(x - 1, y - 2) || inner.opaque(x - 1, y))) bmp.set(x, y, color);
+        }
+      }
+      c = toCanvas(bmp);
+      this.bigBubbles.set(key, c);
+    }
+    return c;
   }
 }

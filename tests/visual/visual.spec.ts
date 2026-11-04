@@ -67,10 +67,6 @@ test.describe("waiting beacons", () => {
     await apply({ type: "agent_spawn", agentId: "a", kind: "claude" });
     await apply({ type: "agent_spawn", agentId: "b", kind: "claude" });
     await page.waitForTimeout(3000);
-    await apply({ type: "agent_waiting", agentId: "a", reason: "" });
-    await apply({ type: "agent_tool", agentId: "b", tool: "Read", summary: "" });
-    await apply({ type: "agent_waiting", agentId: "b", reason: "", need: "input" });
-    await page.waitForTimeout(1000);
     const where = () =>
       page.evaluate(() => {
         const o = (window as unknown as { __agentOffice: Office }).__agentOffice;
@@ -80,13 +76,9 @@ test.describe("waiting beacons", () => {
         };
         return { a: pos("a"), b: pos("b"), origin: o.view.origin, cam: { x: Math.round(o.camera.x), y: Math.round(o.camera.y) }, scale: o.viewport().scale };
       });
-    const w = await where();
-    const png = decode(await page.screenshot());
-    expect(await where()).toEqual(w);
-    expect(w.a.state).toBe("waiting");
-    expect(w.b.state).toBe("waiting");
-    // Beam and ring only: the box stops below the head, where the old sprite bubble sat.
-    const countAbove = (p: { x: number; y: number }, color: string) => {
+    type Where = Awaited<ReturnType<typeof where>>;
+    // Beam and ring only: the box (24×30 world px) stops below the head, where the old sprite bubble sat.
+    const countAbove = (png: ReturnType<typeof decode>, w: Where, p: { x: number; y: number }, color: string) => {
       const s = gridToScreen(p.x, p.y, w.origin);
       let n = 0;
       for (let y = Math.round(s.y) - 24; y <= Math.round(s.y) + 6; y++) {
@@ -101,8 +93,23 @@ test.describe("waiting beacons", () => {
       }
       return n;
     };
-    expect(countAbove(w.a, SCENE_WARM.red), "red beacon above a").toBeGreaterThan(8);
-    expect(countAbove(w.b, SCENE_WARM.sky1), "blue beacon above b").toBeGreaterThan(8);
+    await apply({ type: "agent_tool", agentId: "b", tool: "Read", summary: "" });
+    await page.waitForTimeout(300);
+    await apply({ type: "agent_waiting", agentId: "b", reason: "", need: "input" });
+    // Right away, while b may still be walking to its stop tile: blue already, never a red flash.
+    const w0 = await where();
+    const png0 = decode(await page.screenshot());
+    expect(w0.b.state).toBe("waiting");
+    expect(countAbove(png0, w0, w0.b, SCENE_WARM.red), "no red while b settles").toBe(0);
+    await apply({ type: "agent_waiting", agentId: "a", reason: "" });
+    await page.waitForTimeout(1000);
+    const w = await where();
+    const png = decode(await page.screenshot());
+    expect(await where()).toEqual(w);
+    expect(w.a.state).toBe("waiting");
+    expect(w.b.state).toBe("waiting");
+    expect(countAbove(png, w, w.a, SCENE_WARM.red), "red beacon above a").toBeGreaterThan(8);
+    expect(countAbove(png, w, w.b, SCENE_WARM.sky2), "blue beacon above b").toBeGreaterThan(8);
     expect(errors).toEqual([]);
   });
 });

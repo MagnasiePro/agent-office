@@ -119,6 +119,7 @@ export class Office {
         m.finished = false;
         this.release(a);
         a.state = "waiting";
+        a.waitNeed = e.need === "input" ? "input" : "permission";
         a.stopAtNextTile(() => {
           a.dir = towardViewer(a.dir);
           a.setAnim(e.need === "input" ? "waiting_input" : "waiting");

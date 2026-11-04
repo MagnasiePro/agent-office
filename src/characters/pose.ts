@@ -22,10 +22,6 @@ export interface Pose {
   page: boolean;
   /** Typing glow / screen reflection. */
   glow: boolean;
-  /** "!" bubble vertical offset, or null when hidden. */
-  bubble: number | null;
-  /** Which bubble `bubble` draws: red "!" (permission) or blue "?" (waiting for the next prompt). */
-  bubbleKind: "alert" | "ask";
   /** Sleep "z" drift phase (0..2), or null. */
   zzz: number | null;
   /** Sparkles relative to head top: [dx, dy, big]. */
@@ -44,8 +40,6 @@ const REST: Pose = {
   prop: "none",
   page: false,
   glow: false,
-  bubble: null,
-  bubbleKind: "alert",
   zzz: null,
   sparkles: [],
   wobble: 0,
