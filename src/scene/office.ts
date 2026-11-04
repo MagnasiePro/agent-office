@@ -85,6 +85,7 @@ export class Office {
 
   apply(e: AgentEvent): void {
     if (e.type === "agent_spawn") return this.spawn(e.agentId, e.kind, e.parentId, e.label);
+    if (e.type === "agent_mail") return; // the mail truck arrives with a later task
     let a = this.agents.get(e.agentId);
     if (!a) {
       // Unknown agent: tools/waiting implicitly create it; done/despawn are ignored.

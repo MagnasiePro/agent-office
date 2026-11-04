@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { parseEvent, parseServerMessage, parseUsage, parseUsageUpdate, SnapshotSchema, type Usage } from "../../shared/events";
+import { parseEvent, parseGitEvent, parseServerMessage, parseUsage, parseUsageUpdate, SnapshotSchema, type Usage } from "../../shared/events";
 import { randomScenario, scriptedScenario } from "../../shared/scenario";
-import { animationForStation, stationForTool } from "../../shared/toolMapping";
+import { animationForStation, mailForTool, stationForTool } from "../../shared/toolMapping";
 import { HookAdapter, summarize } from "../../server/hook-adapter";
 import { AgentTracker } from "../../server/tracker";
 
@@ -185,5 +185,61 @@ describe("server tracker", () => {
   it("parseUsageUpdate accepts one window and rejects junk", () => {
     expect(parseUsageUpdate({ fiveHour: { usedPercentage: 40, resetsAt: 1893456000 } })?.type).toBe("usage");
     for (const bad of [{}, [], "x", null, { fiveHour: { usedPercentage: 140, resetsAt: 1 } }, { sevenDay: { usedPercentage: "5", resetsAt: 1 } }]) expect(parseUsageUpdate(bad)).toBeNull();
+  });
+});
+
+describe("mail truck routing", () => {
+  const start = (id: string, cwd: string) => ({ hook_event_name: "SessionStart", session_id: id, cwd });
+
+  it("routes a git push to the session working in that repo", () => {
+    const a = new HookAdapter();
+    a.handle(start("a", "/w/app"));
+    a.handle(start("b", "/w/other"));
+    expect(a.git("/w/app", "push")).toEqual([{ type: "agent_mail", agentId: "a", direction: "push" }]);
+    expect(a.git("/w/none", "pull")).toEqual([]);
+  });
+
+  it("prefers the closest cwd, then the most recent session", () => {
+    let t = 0;
+    const a = new HookAdapter(() => ++t);
+    a.handle(start("a", "/w/app"));
+    a.handle(start("b", "/w/app/packages/ui"));
+    a.handle(start("c", "/w/app"));
+    expect(a.git("/w/app/packages/ui", "pull")).toEqual([{ type: "agent_mail", agentId: "b", direction: "pull" }]);
+    expect(a.git("/w/app/", "pull")).toEqual([{ type: "agent_mail", agentId: "c", direction: "pull" }]);
+  });
+
+  it("attributes mail to the sub-agent that last used a tool", () => {
+    const a = new HookAdapter();
+    a.handle(start("s", "/w/app"));
+    const sub = a.handle({ hook_event_name: "SubagentStart", session_id: "s", agent_id: "x" }).find((e) => e.type === "agent_spawn")!;
+    a.handle({ hook_event_name: "PreToolUse", session_id: "s", agent_id: "x", tool_name: "Bash" });
+    expect(a.git("/w/app", "push")).toEqual([{ type: "agent_mail", agentId: sub.agentId, direction: "push" }]);
+    a.handle({ hook_event_name: "SubagentStop", session_id: "s", agent_id: "x" });
+    expect(a.git("/w/app", "push")).toEqual([{ type: "agent_mail", agentId: "s", direction: "push" }]);
+  });
+
+  it("remote-only GitHub tools count as a push", () => {
+    const a = new HookAdapter();
+    const tool_name = "mcp__plugin_github_github__push_files";
+    expect(mailForTool(tool_name)).toBe("push");
+    expect(a.handle({ hook_event_name: "PostToolUse", session_id: "s", tool_name })).toContainEqual({ type: "agent_mail", agentId: "s", direction: "push" });
+    expect(a.handle({ hook_event_name: "PostToolUseFailure", session_id: "s", tool_name }).some((e) => e.type === "agent_mail")).toBe(false);
+  });
+
+  it("parseGitEvent rejects junk", () => {
+    for (const x of [{}, { repo: "", direction: "push" }, { repo: "/x", direction: "merge" }]) expect(parseGitEvent(x)).toBeNull();
+    expect(parseGitEvent({ repo: "/x", direction: "pull" })).toEqual({ repo: "/x", direction: "pull" });
+  });
+
+  it("tracker never stores agent_mail", () => {
+    const t = new AgentTracker();
+    t.apply({ type: "agent_spawn", agentId: "a", kind: "claude" });
+    t.apply({ type: "agent_tool", agentId: "a", tool: "Read" });
+    t.apply({ type: "agent_mail", agentId: "a", direction: "push" });
+    t.apply({ type: "agent_mail", agentId: "ghost", direction: "push" });
+    const s = t.snapshot();
+    expect(s.agents).toHaveLength(1);
+    expect(s.agents[0]?.last).toEqual({ type: "agent_tool", agentId: "a", tool: "Read" });
   });
 });

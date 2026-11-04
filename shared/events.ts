@@ -26,10 +26,14 @@ export const AgentWaitingSchema = z.object({ type: z.literal("agent_waiting"), a
 export const AgentDoneSchema = z.object({ type: z.literal("agent_done"), agentId: id });
 export const AgentDespawnSchema = z.object({ type: z.literal("agent_despawn"), agentId: id });
 
-export const AgentEventSchema = z.discriminatedUnion("type", [AgentSpawnSchema, AgentToolSchema, AgentWaitingSchema, AgentDoneSchema, AgentDespawnSchema]);
+/** A git push or pull happened in the agent's repo: the mail truck delivers or collects. */
+export const AgentMailSchema = z.object({ type: z.literal("agent_mail"), agentId: id, direction: z.enum(["push", "pull"]) });
+
+export const AgentEventSchema = z.discriminatedUnion("type", [AgentSpawnSchema, AgentToolSchema, AgentWaitingSchema, AgentDoneSchema, AgentDespawnSchema, AgentMailSchema]);
 
 export type AgentSpawnEvent = z.infer<typeof AgentSpawnSchema>;
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
+export type AgentMailEvent = z.infer<typeof AgentMailSchema>;
 
 /** Rate-limit usage windows as Claude Code reports them; `resetsAt` is Unix epoch seconds. Both windows absent = no data. */
 export const UsageWindowSchema = z.object({ usedPercentage: z.number().min(0).max(100), resetsAt: z.number().int().positive() });
@@ -71,4 +75,12 @@ export function parseUsageUpdate(raw: unknown): Usage | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const u = parseUsage({ ...raw, type: "usage" });
   return u && (u.fiveHour || u.sevenDay) ? u : null;
+}
+
+/** Body of `POST /git`, sent by the git hooks: which repo, and whether it pushed or pulled. */
+export const GitEventSchema = z.object({ repo: z.string().min(1).max(1000), direction: z.enum(["push", "pull"]) });
+
+export function parseGitEvent(raw: unknown): { repo: string; direction: "push" | "pull" } | null {
+  const r = GitEventSchema.safeParse(raw);
+  return r.success ? r.data : null;
 }

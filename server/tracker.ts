@@ -16,6 +16,7 @@ export class AgentTracker {
       for (const [id, a] of this.agents) if (a.spawn.parentId === e.agentId) this.agents.delete(id);
       return;
     }
+    if (e.type === "agent_mail") return; // a transient delivery: never a state to replay
     const a = this.agents.get(e.agentId);
     if (a) {
       // A finished-session "?" must not hide a blocking wait a reconnecting screen should still show.

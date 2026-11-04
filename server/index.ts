@@ -2,7 +2,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { parseEvent, parseUsageUpdate, type AgentEvent, type Usage } from "../shared/events";
+import { parseEvent, parseGitEvent, parseUsageUpdate, type AgentEvent, type Usage } from "../shared/events";
 import { play, randomScenario, scriptedScenario } from "../shared/scenario";
 import { HookAdapter } from "./hook-adapter";
 import { AgentTracker } from "./tracker";
@@ -102,6 +102,25 @@ async function api(req: IncomingMessage, res: ServerResponse): Promise<boolean> 
       }
       events = parsed as AgentEvent[];
     }
+    if (events.length) external();
+    events.forEach(broadcast);
+    json(res, 202, { accepted: events.length, events });
+    return true;
+  }
+  if (req.method === "POST" && url.pathname === "/git") {
+    let body: unknown;
+    try {
+      body = await readJson(req);
+    } catch {
+      json(res, 400, { error: "invalid JSON" });
+      return true;
+    }
+    const git = parseGitEvent(body);
+    if (!git) {
+      json(res, 400, { error: "invalid git event" });
+      return true;
+    }
+    const events = adapter.git(git.repo, git.direction);
     if (events.length) external();
     events.forEach(broadcast);
     json(res, 202, { accepted: events.length, events });

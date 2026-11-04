@@ -1,4 +1,5 @@
 import { parseEvent, type AgentEvent } from "../shared/events";
+import { mailForTool } from "../shared/toolMapping";
 
 /**
  * Converts raw Claude Code hook payloads (stdin JSON of a hook, forwarded with curl) into AgentEvents.
@@ -48,6 +49,10 @@ interface Session {
   waiting: Set<string>;
   /** Actors with an AskUserQuestion / ExitPlanMode pending: later permission pings stay "input". */
   asking: Set<string>;
+  cwd?: string;
+  /** Actor of the latest payload (session or sub-agent): who a git push/pull is credited to. */
+  lastActor: string;
+  lastSeen: number;
 }
 
 export function summarize(input: Record<string, unknown> | undefined): string | undefined {
@@ -65,6 +70,22 @@ export function summarize(input: Record<string, unknown> | undefined): string | 
 export class HookAdapter {
   private sessions = new Map<string, Session>();
 
+  constructor(private now: () => number = Date.now) {}
+
+  /** Credits a git push/pull in `repo` to the session working there: closest cwd (exact repo first), then most recently seen. */
+  git(repo: string, direction: "push" | "pull"): AgentEvent[] {
+    const r = repo.replace(/\/+$/, "");
+    let best: Session | undefined;
+    let bestGap = Infinity;
+    for (const s of this.sessions.values()) {
+      const c = s.cwd?.replace(/\/+$/, "");
+      if (!c || !(c === r || c.startsWith(`${r}/`) || r.startsWith(`${c}/`))) continue;
+      const gap = Math.abs(c.length - r.length); // 0 = the session sits exactly in the repo
+      if (gap < bestGap || (gap === bestGap && s.lastSeen >= best!.lastSeen)) [best, bestGap] = [s, gap];
+    }
+    return best ? [{ type: "agent_mail", agentId: best.lastActor, direction }] : [];
+  }
+
   handle(raw: unknown): AgentEvent[] {
     const direct = parseEvent(raw);
     if (direct) return [direct];
@@ -74,6 +95,9 @@ export class HookAdapter {
     const out: AgentEvent[] = [];
     const session = this.ensure(main, p, out);
     const actor = (p.agent_id && session.open.find((s) => s.agentId === p.agent_id)?.id) || main;
+    if (p.cwd) session.cwd = p.cwd;
+    session.lastActor = actor;
+    session.lastSeen = this.now();
 
     switch (p.hook_event_name) {
       case "SessionStart":
@@ -101,6 +125,10 @@ export class HookAdapter {
       }
       case "PostToolUse":
       case "PostToolUseFailure":
+        if (p.hook_event_name === "PostToolUse" && p.tool_name) {
+          const dir = mailForTool(p.tool_name);
+          if (dir) out.push({ type: "agent_mail", agentId: actor, direction: dir });
+        }
         if (p.tool_name && QUESTION_TOOLS.has(p.tool_name)) session.asking.delete(actor);
         if (session.waiting.delete(actor) && p.tool_name) out.push({ type: "agent_tool", agentId: actor, tool: p.tool_name, summary: summarize(p.tool_input) });
         if (p.tool_name && SUBAGENT_TOOLS.has(p.tool_name)) {
@@ -141,13 +169,15 @@ export class HookAdapter {
         this.sessions.delete(main);
         break;
     }
+    // A closed sub-agent can no longer receive mail credit.
+    if (session.lastActor !== main && !session.open.some((s) => s.id === session.lastActor)) session.lastActor = main;
     return out;
   }
 
   private ensure(main: string, p: HookPayload, out: AgentEvent[]): Session {
     let s = this.sessions.get(main);
     if (!s) {
-      s = { open: [], count: 0, waiting: new Set(), asking: new Set() };
+      s = { open: [], count: 0, waiting: new Set(), asking: new Set(), lastActor: main, lastSeen: this.now() };
       this.sessions.set(main, s);
       if (p.hook_event_name !== "SessionEnd") {
         out.push({ type: "agent_spawn", agentId: main, kind: p.agent_kind ?? "claude", label: p.cwd?.split("/").pop() });

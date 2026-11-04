@@ -23,6 +23,7 @@
   "prefixes": {
     "mcp__": "library"
   },
+  "mail": { "push": ["__push_files", "__create_or_update_file", "__delete_file"], "pull": [] },
   "animations": {
     "desk": "work_type",
     "library": "work_read",
