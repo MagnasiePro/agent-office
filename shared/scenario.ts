@@ -17,9 +17,11 @@ export function scriptedScenario(main = "main"): TimedEvent[] {
   const ev: [number, AgentEvent][] = [
     [0, { type: "agent_spawn", agentId: main, kind: "claude", label: "Claude" }],
     [1.5, { type: "agent_tool", agentId: main, tool: "Read", summary: "src/app.ts" }],
+    [3, { type: "agent_mail", agentId: main, direction: "pull" }],
     [5, { type: "agent_tool", agentId: main, tool: "Grep", summary: "TODO" }],
     [8.5, { type: "agent_tool", agentId: main, tool: "Edit", summary: "src/app.ts" }],
     [13, { type: "agent_tool", agentId: main, tool: "Bash", summary: "pnpm test" }],
+    [15, { type: "agent_mail", agentId: main, direction: "push" }],
     [18, { type: "agent_tool", agentId: main, tool: "Task", summary: "Explore the codebase" }],
     [18.6, { type: "agent_spawn", agentId: s1, parentId: main, kind: "claude", label: "Explore" }],
     [19.0, { type: "agent_spawn", agentId: s2, parentId: main, kind: "claude", label: "Explore" }],
@@ -61,8 +63,11 @@ export function* randomScenario(rng: () => number = Math.random, kinds: readonly
     const main = `rnd-${session++}`;
     yield { at: t, event: { type: "agent_spawn", agentId: main, kind: pick(kinds) } };
     const steps = 4 + Math.floor(rng() * 6);
+    const mailStep = Math.floor(rng() * steps);
+    const direction = rng() < 0.5 ? "push" : "pull";
     for (let i = 0; i < steps; i++) {
       t += 2.5 + rng() * 4;
+      if (i === mailStep) yield { at: t, event: { type: "agent_mail", agentId: main, direction } };
       const r = rng();
       if (r < 0.15) {
         yield { at: t, event: { type: "agent_waiting", agentId: main, reason: "permission" } };

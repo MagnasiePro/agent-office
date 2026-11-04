@@ -81,6 +81,28 @@ Tool to workstation (editable in [`shared/tool-stations.json`](../shared/tool-st
 | `SendMessage` | Mailbox | — |
 | Any other tool | Desk | Monitor flashes |
 
+## Git hook (mail truck)
+
+`node scripts/git-hooks.mjs install [port]` adds two global git hooks (config-based, so git 2.54 or newer is required) that run next to your repo hooks, never instead of them. `status` and `uninstall` do what they say; uninstall removes exactly what install added and honours `GIT_CONFIG_GLOBAL`. The hook always exits 0 and posts in the background, so it never slows or blocks git.
+
+How it detects a push or a pull:
+
+- A `pre-push` hook records which remote-tracking refs the push will move, and to which commit, in a marker file in `$TMPDIR`.
+- A `reference-transaction` hook sees the committed `refs/remotes/*` update. If it matches the marker, it is a push (one event per push); any other update of a remote-tracking ref is a pull.
+
+Not detected or misreported (see the header of [`scripts/git-hook.sh`](../scripts/git-hook.sh)): failed pushes and "Already up to date" pulls send nothing; tag-only pushes and pushes to a raw URL are not detected; `git push --no-verify` and non-default fetch refspecs are reported as a pull.
+
+On screen the truck drives up, the agent posts a letter (push) or collects one (pull), and the truck leaves. An agent showing a waiting beacon finishes its wait first.
+
+Remote-only GitHub MCP tools (no local git involved) count as a push on `PostToolUse`: the tool names ending with a suffix of `mail.push` in [`shared/tool-stations.json`](../shared/tool-stations.json) (`__push_files`, `__create_or_update_file`, `__delete_file` by default; `mail.pull` is empty).
+
+The hook sends `POST /git` with `{"repo": "/path/to/repo", "direction": "push" | "pull"}`. The server answers `202`, or `400` `{"error":"invalid git event"}`. It picks the session whose working directory is closest to the repo (exact match first, then the most recently active), and the mail goes to the agent or sub-agent that last used a tool there. Privacy: only the repo path leaves git, and only to localhost.
+
+```bash
+curl -X POST localhost:4317/git -H 'content-type: application/json' \
+  -d '{"repo":"/path/to/repo","direction":"push"}'
+```
+
 ## Status line (usage pies)
 
 `node scripts/statusline.mjs install [port]` registers a Claude Code status line that sends your usage to the server, so the whiteboard shows two pies: 5-hour window (left) and 7 days (right), red from 90 %. They are empty until data arrives or once a window has reset. `status` and `uninstall` do what they say.
@@ -130,7 +152,8 @@ type AgentEvent =
   | { type: "agent_tool"; agentId: string; tool: string; summary?: string }
   | { type: "agent_waiting"; agentId: string; reason?: string; need?: "permission" | "input" | "next_prompt" }
   | { type: "agent_done"; agentId: string }
-  | { type: "agent_despawn"; agentId: string };
+  | { type: "agent_despawn"; agentId: string }
+  | { type: "agent_mail"; agentId: string; direction: "push" | "pull" };
 ```
 
 ```bash
@@ -149,6 +172,7 @@ curl -X POST localhost:4317/usage -H 'content-type: application/json' \
 
 Each window is optional but at least one is required: `usedPercentage` is 0 to 100, `resetsAt` is epoch seconds. The server answers `202`, or `400` `{"error":"invalid usage"}`.
 
+- `agent_mail` is transient: it plays the mail truck visit and is not replayed in the snapshot. `POST /git` sends it for you (see [Git hook](#git-hook-mail-truck)).
 - `need`: `"permission"` (default, red beacon and **!**), `"input"` (blue beacon and **?**, a real question) or `"next_prompt"` (small **?** only, a finished session waiting for your next message).
 - `kind`: `"claude"`, or `"robot"` for the demo character. Any other value gets the default character.
 - An event for an unknown agent creates it (`agent_tool`, `agent_waiting`) or is ignored (`agent_done`, `agent_despawn`). A repeated `agent_done` does nothing. Sub-agents leave with their parent.

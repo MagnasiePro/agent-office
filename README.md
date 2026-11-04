@@ -32,6 +32,7 @@ Each Claude Code session, and each sub-agent it starts, walks to the workstation
 | **Waiting on a sub-agent** | Takes a coffee at the cafeteria bar until the sub-agent reports back |
 | **Done** | A small victory jump with sparkles, then a coffee break, with a small **?** once Claude Code is waiting for the next prompt |
 | **Idle** | Wanders, chats, goes to the cafeteria, falls asleep after ~25 s |
+| **Push / pull** | A mail truck drives up; the agent posts or collects a letter |
 | **Sub-agent** | A mini version of its parent, with its own tint |
 
 A waiting agent goes back to work as soon as it uses a tool or you send a new prompt.
@@ -59,7 +60,15 @@ node scripts/claude-hooks.mjs install
 
 This adds hooks to `~/.claude/settings.json`: it merges with your existing hooks and saves a backup first. Every Claude Code session now shows up in the office, including those already open (from their next event). Undo with `node scripts/claude-hooks.mjs uninstall`.
 
-**3. Optional: show your usage on the whiteboard**
+**3. Optional: mail truck on git push and pull**
+
+```bash
+node scripts/git-hooks.mjs install
+```
+
+A mail truck comes for the agent when a push or a pull happens in its repo. Needs git 2.54+. Undo with `node scripts/git-hooks.mjs uninstall`. Details in [Configuration](docs/configuration.md#git-hook-mail-truck).
+
+**4. Optional: show your usage on the whiteboard**
 
 ```bash
 node scripts/statusline.mjs install
