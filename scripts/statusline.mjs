@@ -23,7 +23,8 @@ async function run(port, prev) {
   let input = {};
   try { input = JSON.parse(raw.toString("utf8")); } catch {}
 
-  const win = (w) => (w ? { usedPercentage: w.used_percentage, resetsAt: w.resets_at } : undefined);
+  // Claude Code may report more than 100 % in overage; drop windows without a usable number.
+  const win = (w) => (Number.isFinite(w?.used_percentage) ? { usedPercentage: Math.min(100, Math.max(0, w.used_percentage)), resetsAt: w.resets_at } : undefined);
   const body = { fiveHour: win(input.rate_limits?.five_hour), sevenDay: win(input.rate_limits?.seven_day) };
   const post = body.fiveHour || body.sevenDay
     ? fetch(`http://localhost:${port}/usage`, {
@@ -58,7 +59,11 @@ if (cmd === "run") {
 
 const settings = existsSync(FILE) ? JSON.parse(readFileSync(FILE, "utf8")) : {};
 const ours = (s) => typeof s?.command === "string" && s.command.includes(MARK);
-const storedPrev = (s) => decode(s.command.match(/ run \d+ (\S+) # agent-office$/)?.[1] ?? "-");
+const storedPrev = (s) => {
+  const m = s.command.match(/ run \d+ (\S+) # agent-office$/);
+  if (!m) throw new Error("unreadable");
+  return decode(m[1]);
+};
 
 function save() {
   const backup = `${FILE}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
@@ -67,9 +72,16 @@ function save() {
   console.log(`saved ${FILE} (backup: ${backup})`);
 }
 
-if (cmd === "install") {
+if (cmd === "install" && !/^\d+$/.test(arg1 ?? "4317")) {
+  console.error("usage: node scripts/statusline.mjs install [port]");
+  process.exit(1);
+} else if (cmd === "install") {
   const port = arg1 ?? "4317";
-  const previous = ours(settings.statusLine) ? storedPrev(settings.statusLine) : settings.statusLine;
+  let previous;
+  try { previous = ours(settings.statusLine) ? storedPrev(settings.statusLine) : settings.statusLine; } catch {
+    console.error("cannot read the previous status line stored in the Agent Office command; run uninstall first or fix it by hand");
+    process.exit(1);
+  }
   const script = fileURLToPath(import.meta.url);
   settings.statusLine = { ...previous, type: "command", command: `node "${script}" run ${port} ${encode(previous)} ${MARK}` };
   save();
@@ -77,13 +89,19 @@ if (cmd === "install") {
   if (!ours(settings.statusLine)) {
     console.log("Agent Office status line not installed (current status line left untouched)");
   } else {
-    const previous = storedPrev(settings.statusLine);
+    let previous;
+    try { previous = storedPrev(settings.statusLine); } catch {
+      console.log("cannot read the previous status line stored in the Agent Office command; nothing changed (restore it by hand from the .bak file)");
+      process.exit(0);
+    }
     if (previous) settings.statusLine = previous;
     else delete settings.statusLine;
     save();
   }
 } else if (ours(settings.statusLine)) {
-  console.log(`Agent Office status line on (${storedPrev(settings.statusLine) ? "wraps a previous command" : "no previous status line"})`);
+  let wraps = false;
+  try { wraps = !!storedPrev(settings.statusLine); } catch {}
+  console.log(`Agent Office status line on (${wraps ? "wraps a previous command" : "no previous status line"})`);
 } else {
   console.log("Agent Office status line not installed");
 }

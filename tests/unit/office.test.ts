@@ -273,6 +273,21 @@ describe("agent status visibility", () => {
     expect(agent("a").awaitingPrompt).toBe(false);
   });
 
+  it("the idle_prompt event does not wake a finished agent that fell asleep", () => {
+    spawn("a");
+    run(1);
+    apply({ type: "agent_tool", agentId: "a", tool: "Edit" });
+    run(15);
+    apply({ type: "agent_done", agentId: "a" });
+    run(120);
+    expect(agent("a").anim).toBe("sleep");
+    const rest = agent("a").restTime;
+    apply({ type: "agent_waiting", agentId: "a", need: "next_prompt" });
+    run(1);
+    expect(agent("a").anim).toBe("sleep");
+    expect(agent("a").restTime).toBeGreaterThanOrEqual(rest);
+  });
+
   it("a real question on an idle agent still gets the beacon", () => {
     spawn("a");
     run(3);

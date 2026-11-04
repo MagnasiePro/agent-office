@@ -1,4 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -31,6 +33,39 @@ describe("statusline script", () => {
     expect(read().statusLine.padding).toBe(2);
     run(["uninstall"]);
     expect(read().statusLine).toEqual(original);
+  });
+
+  it("rejects a non-numeric port without writing", () => {
+    writeFileSync(file, "{}");
+    expect(() => execFileSync("node", [script, "install", "--help"], { env: { ...process.env, CLAUDE_SETTINGS: file }, stdio: "pipe" })).toThrow(/usage: node scripts\/statusline.mjs install \[port\]/);
+    expect(readFileSync(file, "utf8")).toBe("{}");
+  });
+
+  it("refuses to uninstall when the stored previous status line cannot be parsed", () => {
+    const mangled = { type: "command", command: 'node "x.mjs" run --help eyJ4 # agent-office' };
+    writeFileSync(file, JSON.stringify({ statusLine: mangled }));
+    expect(run(["uninstall"])).toContain("cannot");
+    expect(read().statusLine).toEqual(mangled);
+  });
+
+  it("clamps usage above 100 and skips non-numeric windows", async () => {
+    const bodies: unknown[] = [];
+    const server = createServer((req, res) => {
+      let b = "";
+      req.on("data", (c) => (b += c));
+      req.on("end", () => { bodies.push(JSON.parse(b)); res.end(); });
+    });
+    await new Promise<void>((r) => server.listen(0, r));
+    const { port } = server.address() as AddressInfo;
+    const input = JSON.stringify({ rate_limits: { five_hour: { used_percentage: 130, resets_at: 1 }, seven_day: { used_percentage: "x", resets_at: 2 } } });
+    await new Promise<void>((res, rej) => {
+      const c = spawn("node", [script, "run", String(port), "-"], { env: { ...process.env, CLAUDE_SETTINGS: file }, stdio: ["pipe", "ignore", "ignore"] });
+      c.on("close", () => res());
+      c.on("error", rej);
+      c.stdin.end(input);
+    });
+    server.close();
+    expect(bodies).toEqual([{ fiveHour: { usedPercentage: 100, resetsAt: 1 } }]);
   });
 
   it("leaves a status line it does not own untouched on uninstall", () => {

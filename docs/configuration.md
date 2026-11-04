@@ -74,11 +74,12 @@ Tool to workstation (editable in [`shared/tool-stations.json`](../shared/tool-st
 | Tools | Workstation | Effect |
 |---|---|---|
 | `Edit`, `MultiEdit`, `Write`, `NotebookEdit` | Desk | Monitor flashes |
-| `Read`, `Grep`, `Glob`, `LS`, `WebSearch`, `WebFetch`, `mcp__*` | Library | Open glowing book |
+| `Read`, `Grep`, `Glob`, `LS`, `NotebookRead`, `WebSearch`, `WebFetch`, `mcp__*` | Library | Open glowing book |
 | `Bash`, `BashOutput`, `KillShell` | Server rack | Progress bar runs |
 | `TodoWrite` | Whiteboard | Marker writes |
 | `Task`, `Agent` | Cafeteria bar | Parent takes a coffee (mug and steam) while its sub-agent works |
-| `SendMessage` | Mailbox | |
+| `SendMessage` | Mailbox | — |
+| Any other tool | Desk | Monitor flashes |
 
 ## Status line (usage pies)
 
@@ -88,7 +89,7 @@ Tool to workstation (editable in [`shared/tool-stations.json`](../shared/tool-st
 - An existing status line keeps working: ours wraps it, passes it the same input and prints its output. `uninstall` restores it exactly. Without one, a minimal line (model and folder) is shown.
 - Privacy: only the two percentages and their reset times are sent, to `localhost`, with a 500 ms timeout. Failures are silent.
 - Claude Code only provides usage to Claude.ai Pro and Max subscribers. Without a subscription the pies stay empty.
-- The demo shows fake usage until the first real event.
+- The demo shows fake usage until the first real agent event.
 
 <details>
 <summary>Manual setup (minimal hooks)</summary>

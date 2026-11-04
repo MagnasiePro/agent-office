@@ -17,7 +17,12 @@ export class AgentTracker {
       return;
     }
     const a = this.agents.get(e.agentId);
-    if (a) a.last = e;
+    if (a) {
+      // A finished-session "?" must not hide a blocking wait a reconnecting screen should still show.
+      const l = a.last;
+      const blocking = l?.type === "agent_waiting" && l.need !== "next_prompt";
+      if (!(blocking && e.type === "agent_waiting" && e.need === "next_prompt")) a.last = e;
+    }
     else if (e.type !== "agent_done") this.agents.set(e.agentId, { spawn: { type: "agent_spawn", agentId: e.agentId, kind: "claude" }, last: e });
   }
 

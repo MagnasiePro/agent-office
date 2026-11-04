@@ -98,7 +98,7 @@ export class Office {
       m.pending.push(e);
       return;
     }
-    a.restTime = 0;
+    if (!(e.type === "agent_waiting" && e.need === "next_prompt")) a.restTime = 0;
     switch (e.type) {
       case "agent_tool": {
         a.awaitingPrompt = false;

@@ -132,6 +132,16 @@ describe("hook adapter", () => {
     expect(h.handle({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", session_id: "s" })).toContainEqual({ type: "agent_tool", agentId: "s", tool: "AskUserQuestion" });
   });
 
+  it("a pending question keeps later PermissionRequest/Notification as input waits", () => {
+    const h = new HookAdapter();
+    h.handle({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", session_id: "s" });
+    expect(h.handle({ hook_event_name: "PermissionRequest", session_id: "s" })).toContainEqual({ type: "agent_waiting", agentId: "s", need: "input" });
+    expect(h.handle({ hook_event_name: "Notification", session_id: "s", notification_type: "idle_prompt" })).toContainEqual({ type: "agent_waiting", agentId: "s", need: "next_prompt" });
+    h.handle({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", session_id: "s" });
+    const plain = h.handle({ hook_event_name: "PermissionRequest", session_id: "s" });
+    expect(plain.find((e) => e.type === "agent_waiting")).toEqual({ type: "agent_waiting", agentId: "s" });
+  });
+
   it("passes AgentEvents through and ignores junk", () => {
     const h = new HookAdapter();
     expect(h.handle({ type: "agent_done", agentId: "x" })).toEqual([{ type: "agent_done", agentId: "x" }]);
@@ -151,6 +161,17 @@ describe("server tracker", () => {
     expect(snap.agents[1]!.last).toEqual({ type: "agent_tool", agentId: "c", tool: "Read" });
     t.apply({ type: "agent_despawn", agentId: "p" });
     expect(t.ids()).toEqual([]);
+  });
+
+  it("a next_prompt wait does not replace a blocking wait as the replayed state", () => {
+    const t = new AgentTracker();
+    t.apply({ type: "agent_spawn", agentId: "a", kind: "claude" });
+    t.apply({ type: "agent_waiting", agentId: "a", need: "input" });
+    t.apply({ type: "agent_waiting", agentId: "a", need: "next_prompt" });
+    expect(t.snapshot().agents[0]!.last).toEqual({ type: "agent_waiting", agentId: "a", need: "input" });
+    t.apply({ type: "agent_done", agentId: "a" });
+    t.apply({ type: "agent_waiting", agentId: "a", need: "next_prompt" });
+    expect(t.snapshot().agents[0]!.last).toEqual({ type: "agent_waiting", agentId: "a", need: "next_prompt" });
   });
 
   it("tracker keeps the latest usage and replays it in the snapshot", () => {

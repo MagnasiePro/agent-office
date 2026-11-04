@@ -46,6 +46,8 @@ interface Session {
   count: number;
   /** Agents showing a "!" bubble, resumed by their next PostToolUse. */
   waiting: Set<string>;
+  /** Actors with an AskUserQuestion / ExitPlanMode pending: later permission pings stay "input". */
+  asking: Set<string>;
 }
 
 export function summarize(input: Record<string, unknown> | undefined): string | undefined {
@@ -84,6 +86,7 @@ export class HookAdapter {
         if (!p.tool_name) break;
         if (QUESTION_TOOLS.has(p.tool_name)) {
           session.waiting.add(actor);
+          session.asking.add(actor);
           out.push({ type: "agent_waiting", agentId: actor, need: "input", reason: summarize(p.tool_input) });
           break;
         }
@@ -98,6 +101,7 @@ export class HookAdapter {
       }
       case "PostToolUse":
       case "PostToolUseFailure":
+        if (p.tool_name && QUESTION_TOOLS.has(p.tool_name)) session.asking.delete(actor);
         if (session.waiting.delete(actor) && p.tool_name) out.push({ type: "agent_tool", agentId: actor, tool: p.tool_name, summary: summarize(p.tool_input) });
         if (p.tool_name && SUBAGENT_TOOLS.has(p.tool_name)) {
           const i = session.open.findIndex((s) => s.toolUseId && s.toolUseId === p.tool_use_id);
@@ -123,11 +127,13 @@ export class HookAdapter {
       case "PermissionRequest":
       case "Notification":
         session.waiting.add(actor);
-        out.push({ type: "agent_waiting", agentId: actor, reason: p.message?.slice(0, 200), ...(p.notification_type === "idle_prompt" ? { need: "next_prompt" as const } : {}) });
+        const need = p.notification_type === "idle_prompt" ? ("next_prompt" as const) : session.asking.has(actor) ? ("input" as const) : undefined;
+        out.push({ type: "agent_waiting", agentId: actor, reason: p.message?.slice(0, 200), ...(need ? { need } : {}) });
         break;
       case "Stop":
       case "StopFailure":
         session.waiting.delete(main);
+        session.asking.delete(main);
         out.push({ type: "agent_done", agentId: main });
         break;
       case "SessionEnd":
@@ -141,7 +147,7 @@ export class HookAdapter {
   private ensure(main: string, p: HookPayload, out: AgentEvent[]): Session {
     let s = this.sessions.get(main);
     if (!s) {
-      s = { open: [], count: 0, waiting: new Set() };
+      s = { open: [], count: 0, waiting: new Set(), asking: new Set() };
       this.sessions.set(main, s);
       if (p.hook_event_name !== "SessionEnd") {
         out.push({ type: "agent_spawn", agentId: main, kind: p.agent_kind ?? "claude", label: p.cwd?.split("/").pop() });
