@@ -351,8 +351,9 @@ export class Ambient {
         }
         case "whiteboard": {
           // A green marker (2×4, ink tip) drawing a thick wavy green stroke on the board (+x face at lx 6), then starting over.
+          // Along the board's top band, clear of the usage pies (board lz 9..19).
           const n = Math.floor(((t / 2 + seed) % 1) * 13);
-          const wave = (i: number) => 37 + (i % 4 === 1 ? 1 : i % 4 === 3 ? -1 : 0);
+          const wave = (i: number) => 39 + (i % 4 === 1 ? 1 : i % 4 === 3 ? -1 : 0);
           for (let i = 0; i <= n; i++) dot(6, 2 + i, wave(i), pal.leaf1, 1, 2);
           dot(8, 2 + n, wave(n) + 4, pal.leaf0, 2, 3);
           dot(8, 2 + n, wave(n) + 1, pal.ink, 2, 1);

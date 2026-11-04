@@ -9,6 +9,7 @@ import { Ambient } from "./scene/ambient";
 import { Camera, viewportFor } from "./scene/camera";
 import { WorldView } from "./scene/compose";
 import { Office } from "./scene/office";
+import { drawUsagePies } from "./scene/usagePies";
 import { OFFICE } from "./world/layout";
 import { renderBackground, VIEW_H, VIEW_W, worldContentRows } from "./world/roomRender";
 
@@ -89,6 +90,7 @@ const loop = startLoop((rawDt) => {
   ctx.setTransform(1, 0, 0, 1, -Math.round(camera.x), -Math.round(camera.y));
   view.draw(ctx, t, office.actors(), (c) => {
     ambient.draw(c, t);
+    drawUsagePies(c, usage, OFFICE, view.origin, pal, Date.now() / 1000);
     ambient.drawLinks(c, office.links(), t);
     ambient.drawSleepy(c, office.agents.values(), t);
     ambient.drawSpeech(c, office.speeches(), office.agents);

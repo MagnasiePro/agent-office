@@ -172,18 +172,9 @@ export const WHITEBOARD: FurnitureDef = {
       const ly = y - 2;
       const lz = z - 16;
       if (ly < 1 || ly > 27 || lz < 1 || lz > 24) return pal.wall2; // frame
-      // Sticky notes.
-      if (ly > 20 && ly < 25 && lz > 15 && lz < 21) return pal.butter;
-      if (ly > 21 && ly < 26 && lz > 7 && lz < 13) return pal.blush;
-      // A little flow chart: boxes and arrows.
-      const inBox = (y0: number, z0: number) => ly >= y0 && ly < y0 + 6 && lz >= z0 && lz < z0 + 4;
-      const onBorder = (y0: number, z0: number) =>
-        inBox(y0, z0) && (Math.floor(ly) === y0 || Math.floor(ly) === y0 + 5 || Math.floor(lz) === z0 || Math.floor(lz) === z0 + 3);
-      if (onBorder(3, 17) || onBorder(12, 17)) return pal.sky1;
-      if (onBorder(7, 6)) return pal.coral1;
-      if (Math.floor(lz) === 19 && ly > 9 && ly < 12) return pal.ink;
-      if (Math.floor(ly) === 10 && lz > 10 && lz < 17) return pal.ink;
-      if (Math.floor(lz) === 3 && ly > 3 && ly < 18 && Math.floor(ly) % 3 !== 0) return pal.red; // underline
+      // Sticky notes on the left edge (higher ly is further left); the usage pies are drawn live over the rest.
+      if (ly >= 24 && ly < 28 && lz > 15 && lz < 21) return pal.butter;
+      if (ly >= 24 && ly < 28 && lz > 7 && lz < 13) return pal.blush;
       return null;
     });
   },
