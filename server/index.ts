@@ -6,6 +6,7 @@ import { parseEvent, parseGitEvent, parseUsageUpdate, type AgentEvent, type Usag
 import { play, randomScenario, scriptedScenario } from "../shared/scenario";
 import { HookAdapter } from "./hook-adapter";
 import { AgentTracker } from "./tracker";
+import { startUsagePoller } from "./usage-poller";
 import { checkUpdate, readVersion, type UpdateInfo } from "../scripts/update.mjs";
 
 const PORT = Number(process.env.PORT ?? 4317);
@@ -15,6 +16,8 @@ const DEMO = process.env.DEMO !== "0";
 const ROOT = join(import.meta.dirname, "..");
 /** Daily look at the latest GitHub release; only offers, never applies. Disable with UPDATE_CHECK=0. */
 const UPDATE_CHECK = process.env.UPDATE_CHECK !== "0";
+/** Opt-in: poll Claude's usage endpoint with Claude Code's login, for the pies when no status line runs (desktop app). */
+const USAGE_POLL = process.env.USAGE_POLL === "1";
 
 const tracker = new AgentTracker();
 const adapter = new HookAdapter();
@@ -71,6 +74,12 @@ if (UPDATE_CHECK) {
   void refreshUpdate();
   setInterval(() => void refreshUpdate(), 24 * 3600_000).unref();
 }
+
+function setUsage(u: Usage): void {
+  tracker.usage = u; // deliberately not external(): usage alone must not stop the demo
+  broadcastRaw(u);
+}
+if (USAGE_POLL) startUsagePoller(setUsage, 5 * 60_000);
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────
 function readJson(req: IncomingMessage): Promise<unknown> {
@@ -155,8 +164,7 @@ async function api(req: IncomingMessage, res: ServerResponse): Promise<boolean> 
       json(res, 400, { error: "invalid usage" });
       return true;
     }
-    tracker.usage = usage; // deliberately not external(): usage alone must not stop the demo
-    broadcastRaw(usage);
+    setUsage(usage);
     json(res, 202, { accepted: true });
     return true;
   }

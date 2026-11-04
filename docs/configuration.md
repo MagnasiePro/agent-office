@@ -31,6 +31,7 @@ Everything beyond the [quick start](../README.md#quick-start): commands, setting
 |---|---|---|
 | `PORT` | `4317` | Server port |
 | `DEMO` | on | Built-in demo that stops at the first real event. `DEMO=0` turns it off |
+| `USAGE_POLL` | off | `USAGE_POLL=1` fills the usage pies from Claude's usage endpoint, for the desktop app ([Usage poll](#usage-poll-desktop-app)) |
 | `UPDATE_CHECK` | on | Daily look for a new release on GitHub ([Updates](#updates)). `UPDATE_CHECK=0` turns it off: no network request, no notice |
 
 ```bash
@@ -116,6 +117,15 @@ curl -X POST localhost:4317/git -H 'content-type: application/json' \
 - Privacy: only the two percentages and their reset times are sent, to `localhost`, with a 500 ms timeout. Failures are silent.
 - Claude Code only provides usage to Claude.ai Pro and Max subscribers. Without a subscription the pies stay empty.
 - The demo shows fake usage until the first real agent event.
+
+### Usage poll (desktop app)
+
+The desktop app never runs a status line, so the pies stay empty there. With `USAGE_POLL=1` the server fetches the same numbers itself every 5 minutes from `https://api.anthropic.com/api/oauth/usage`, using Claude Code's login (macOS Keychain item `Claude Code-credentials`, else `~/.claude/.credentials.json`). You need to have logged in once with `claude` in a terminal.
+
+- The desktop app keeps its own login, so the terminal one expires. The server then refreshes it the way Claude Code does and writes the new token back in place (the refresh token changes each time, keeping the old one would log the CLI out). macOS may ask once to let `security` update the item.
+- If that write ever fails, the CLI login is lost: run `claude` then `/login`. The server logs `login refresh failed` when it happens.
+- Privacy: the token only goes to Anthropic (`api.anthropic.com`, `platform.claude.com`); the percentages stay on `localhost`. The endpoint is undocumented: if it changes, the pies go empty and the server logs why.
+- With the LaunchAgent: `USAGE_POLL=1 scripts/launchagent.sh install`.
 
 <details>
 <summary>Manual setup (minimal hooks)</summary>
