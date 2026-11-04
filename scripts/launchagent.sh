@@ -2,8 +2,10 @@
 # Installs / removes a macOS LaunchAgent that runs the Agent Office server (production build) at login.
 #   scripts/launchagent.sh install     build, write the plist, load it
 #   scripts/launchagent.sh uninstall   unload and delete the plist
+#   scripts/launchagent.sh restart     restart the server with its current settings (used after an update)
 #   scripts/launchagent.sh status
-# Options via env: PORT (default 4317), DEMO (default 1 = demo until real events arrive).
+# Options via env: PORT (default 4317), DEMO (default 1 = demo until real events arrive),
+# UPDATE_CHECK (default 1 = daily look for a new release; 0 = off).
 set -euo pipefail
 
 LABEL="com.agent-office.server"
@@ -12,6 +14,7 @@ LOG="$HOME/Library/Logs/agent-office.log"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PORT:-4317}"
 DEMO="${DEMO:-1}"
+UPDATE_CHECK="${UPDATE_CHECK:-1}"
 DOMAIN="gui/$(id -u)"
 
 case "${1:-}" in
@@ -39,6 +42,7 @@ case "${1:-}" in
     <key>NODE_ENV</key><string>production</string>
     <key>PORT</key><string>$PORT</string>
     <key>DEMO</key><string>$DEMO</string>
+    <key>UPDATE_CHECK</key><string>$UPDATE_CHECK</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -57,12 +61,16 @@ PLIST
     rm -f "$PLIST"
     echo "Removed $LABEL"
     ;;
+  restart)
+    launchctl kickstart -k "$DOMAIN/$LABEL"
+    echo "Restarted $LABEL"
+    ;;
   status)
     launchctl print "$DOMAIN/$LABEL" 2>/dev/null | grep -E "state|pid|last exit" || echo "not loaded"
     curl -s "http://localhost:$PORT/health" && echo
     ;;
   *)
-    echo "usage: $0 install|uninstall|status" >&2
+    echo "usage: $0 install|uninstall|restart|status" >&2
     exit 1
     ;;
 esac
