@@ -22,10 +22,6 @@ export interface Pose {
   page: boolean;
   /** Typing glow / screen reflection. */
   glow: boolean;
-  /** "!" bubble vertical offset, or null when hidden. */
-  bubble: number | null;
-  /** Which bubble `bubble` draws: red "!" (permission) or blue "?" (waiting for the next prompt). */
-  bubbleKind: "alert" | "ask";
   /** Sleep "z" drift phase (0..2), or null. */
   zzz: number | null;
   /** Sparkles relative to head top: [dx, dy, big]. */
@@ -44,8 +40,6 @@ const REST: Pose = {
   prop: "none",
   page: false,
   glow: false,
-  bubble: null,
-  bubbleKind: "alert",
   zzz: null,
   sparkles: [],
   wobble: 0,
@@ -90,9 +84,10 @@ export function poseFor(anim: AnimName, f: number): Pose {
     case "work_read":
       return { ...REST, bob: f === 2 ? 1 : 0, prop: "book", page: f === 3, armL: 1, armR: 1, eyes: f === 1 ? "blink" : "focus" };
     case "waiting":
-      return { ...REST, bob: f < 2 ? 0 : 1, eyes: "up", bubble: f < 2 ? 0 : -1, armR: f % 2 === 0 ? -3 : -2 };
+      // The scene overlay draws the beacon and its bubble (Ambient.drawBeacons).
+      return { ...REST, bob: f < 2 ? 0 : 1, eyes: "up", armR: f % 2 === 0 ? -3 : -2 };
     case "waiting_input":
-      return { ...REST, bob: f === 1 || f === 2 ? 1 : 0, eyes: f === 3 ? "blink" : "up", bubble: f === 1 || f === 2 ? 0 : -1, bubbleKind: "ask" };
+      return { ...REST, bob: f === 1 || f === 2 ? 1 : 0, eyes: f === 3 ? "blink" : "up" };
     case "sleep":
       return { ...REST, bob: f < 3 ? 1 : 0, eyes: "blink", zzz: Math.floor(f / 2) };
     case "done": {

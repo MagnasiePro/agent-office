@@ -6,6 +6,8 @@ export interface Office {
   stats: { fps: number; frames: number; frameMs: number };
   apply(e: unknown): void;
   viewport(): { scale: number; w: number; h: number; cssW: number; cssH: number };
+  view: { origin: { x: number; y: number } };
+  camera: { x: number; y: number };
 }
 
 export const SIZES = [

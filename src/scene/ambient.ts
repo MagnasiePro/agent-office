@@ -1,10 +1,15 @@
 import type { ScenePalette } from "../art/palette";
-import { bayer } from "../engine/bitmap";
+import { bayer, Bitmap } from "../engine/bitmap";
 import { gridToScreen, worldToScreen, UNIT, type Vec2 } from "../engine/iso";
 import type { Agent } from "../engine/agent";
 import { toCanvas } from "../engine/canvas";
-import { speechBubble } from "../engine/emotes";
-import type { Speech } from "./office";
+import { drawAlertBubble, drawAskBubble, speechBubble } from "../engine/emotes";
+import { frameAt } from "../engine/sprite";
+import type { Direction, SizeClass } from "../characters/types";
+import type { Office, Speech } from "./office";
+import { TRUCK_ANCHOR, truckSprite } from "./truck";
+import { MAILBOX } from "../world/furniture";
+import { renderCropped } from "../engine/isoPaint";
 import type { WorldLayout } from "../world/layout";
 import { fairySag } from "../world/roomRender";
 
@@ -12,6 +17,9 @@ function hash(n: number): number {
   const s = Math.sin(n * 91.7) * 43758.5453;
   return s - Math.floor(s);
 }
+
+/** One grid step in each facing direction. */
+const STEP: Record<Direction, [number, number]> = { NE: [0, -1], NW: [-1, 0], SE: [0, 1], SW: [1, 0] };
 
 /** Cheap living details drawn over the scene: twinkling stars, fairy lights, dust in the moonlight. */
 export class Ambient {
@@ -137,5 +145,301 @@ export class Ambient {
         ctx.fillRect(Math.round(x0 + (x1 - x0) * k), Math.round(y0 + (y1 - y0) * k + sag), 1, 1);
       }
     }
+  }
+
+  /** Red "!" (permission) or blue "?" (a real question) for agents blocked on the user, else null. */
+  private beacon(a: Agent): { main: string; glow: string; period: number; ask: boolean } | null {
+    if (a.state !== "waiting") return null;
+    const ask = a.waitNeed === "input";
+    // sky2, not sky1: sky1 is the couch/rug colour and too dark to stand out.
+    return ask ? { main: this.pal.sky2, glow: this.pal.sky1, period: 1.8, ask } : { main: this.pal.red, glow: this.pal.coral1, period: 1.0, ask };
+  }
+
+  /** 0..1..0 once per period. */
+  private static pulse(t: number, period: number): number {
+    return (1 - Math.cos(((t % period) / period) * Math.PI * 2)) / 2;
+  }
+
+  private ringCache = new Map<string, HTMLCanvasElement>();
+
+  /** Underlay: pulsing dithered ring on the floor around each waiting agent's feet. */
+  drawBeaconRings(ctx: CanvasRenderingContext2D, agents: Iterable<Agent>, t: number): void {
+    for (const a of agents) {
+      const b = this.beacon(a);
+      if (!b) continue;
+      const grow = Math.round(Ambient.pulse(t, b.period) * 3);
+      const { rx: srx, ry: sry } = a.sprites.size.shadow;
+      const rx = srx + 4 + grow;
+      const ry = sry + 2 + Math.ceil(grow / 2);
+      const key = `${rx}|${ry}|${grow}|${b.main}`;
+      let c = this.ringCache.get(key);
+      if (!c) {
+        const bmp = new Bitmap(rx * 2 + 1, ry * 2 + 1);
+        const inEllipse = (x: number, y: number, ex: number, ey: number) => ((x - rx) / (ex + 0.5)) ** 2 + ((y - ry) / (ey + 0.5)) ** 2 <= 1;
+        // The ring thins out as it expands, like a ripple.
+        const density = 1 - grow * 0.17;
+        for (let y = 0; y <= ry * 2; y++) {
+          for (let x = 0; x <= rx * 2; x++) {
+            if (!inEllipse(x, y, rx, ry)) continue;
+            if (!inEllipse(x, y, rx - 2, ry - 1)) {
+              if (bayer(x, y) < density) bmp.set(x, y, b.main);
+            } else if (bayer(x, y) < 0.25) bmp.set(x, y, b.glow);
+          }
+        }
+        c = toCanvas(bmp);
+        this.ringCache.set(key, c);
+      }
+      const s = gridToScreen(a.x, a.y, this.origin);
+      ctx.drawImage(c, Math.round(s.x) - rx, Math.round(s.y) - ry);
+    }
+  }
+
+  /** Beam canvases per agent frame (the beam skips the agent's own pixels so it reads as behind them). */
+  private beamCache = new WeakMap<Bitmap, Map<string, HTMLCanvasElement>>();
+  private bigBubbles = new Map<string, HTMLCanvasElement>();
+  private askBubbles = new Map<SizeClass, HTMLCanvasElement>();
+
+  /**
+   * Overlay: light beam rising from each waiting agent with a big bobbing "!" or "?" above the head,
+   * plus the small "?" over finished sessions that wait for their next prompt.
+   */
+  drawBeacons(ctx: CanvasRenderingContext2D, agents: Iterable<Agent>, t: number): void {
+    const big: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    const small: Agent[] = [];
+    for (const a of agents) {
+      const b = this.beacon(a);
+      if (!b) {
+        if (a.awaitingPrompt && a.state !== "despawning" && a.state !== "gone") small.push(a);
+        continue;
+      }
+      const s = gridToScreen(a.x, a.y, this.origin);
+      const sx = Math.round(s.x);
+      const sy = Math.round(s.y);
+      const h = a.sprites.size.head;
+      const k = Ambient.pulse(t, b.period);
+      const level = 3 + Math.round(k); // 3/4 or 4/4 of full density
+      const anim = a.sprites.anims[a.anim];
+      const frame = anim.frames[a.dir][frameAt(anim.spec, a.animTime)]!;
+      const { anchor, shadow } = a.sprites.size;
+      const hw = shadow.rx + 2;
+      const H = a.mini ? 34 : 48;
+      let byFrame = this.beamCache.get(frame);
+      if (!byFrame) this.beamCache.set(frame, (byFrame = new Map()));
+      const key = `${level}|${b.main}|${hw}|${H}`;
+      let beam = byFrame.get(key);
+      if (!beam) {
+        const bmp = new Bitmap(hw * 2 + 1, H);
+        const edgeW = a.mini ? 2 : 3;
+        for (let y = 0; y < H; y++) {
+          // Solid over the lower two thirds, dithering out over the top third.
+          const fade = Math.min(1, (y + 1) / (H / 3)) * (level / 4);
+          for (let x = 0; x <= hw * 2; x++) {
+            // Beam pixel in frame coordinates: the beam's bottom-centre sits on the anchor.
+            if (frame.opaque(x - hw + anchor.x, y - H + 1 + anchor.y)) continue;
+            const d = bayer(x, y);
+            const fromEdge = Math.min(x, hw * 2 - x);
+            if (fromEdge < edgeW) {
+              if (d >= fade) continue;
+              // Blue gets a cream highlight on the inner edge column so it reads against dark floors.
+              bmp.set(x, y, b.ask && fromEdge === edgeW - 1 && d < fade * 0.5 ? this.pal.cream : b.main);
+            } else if (d < 0.6 * fade) bmp.set(x, y, d < 0.45 * fade ? b.main : b.glow);
+          }
+        }
+        beam = toCanvas(bmp);
+        byFrame.set(key, beam);
+      }
+      ctx.drawImage(beam, sx - hw, sy - H + 1);
+      const bubble = this.bigBubble(b.ask, b.main);
+      const bob = Math.round(k * 2);
+      const x = sx + h.x - bubble.width;
+      const y = sy + h.y - 28 - bob;
+      ctx.drawImage(bubble, x, y, bubble.width * 2, bubble.height * 2);
+      big.push({ x0: x, y0: y, x1: x + bubble.width * 2, y1: y + bubble.height * 2 });
+    }
+    for (const a of small) {
+      const s = gridToScreen(a.x, a.y, this.origin);
+      const h = a.sprites.size.head;
+      const size = a.sprites.variant.size;
+      let c = this.askBubbles.get(size);
+      if (!c) {
+        const bmp = new Bitmap(7, 11);
+        drawAskBubble(bmp, 3, 10, size);
+        c = toCanvas(bmp);
+        this.askBubbles.set(size, c);
+      }
+      const x = Math.round(s.x) + h.x + 3;
+      const y = Math.round(s.y) + h.y - 12; // tail just above the head, as the sprite used to draw it
+      // A waiting agent's big bubble wins over a neighbour's small "?".
+      if (big.some((r) => x < r.x1 && x + c.width > r.x0 && y < r.y1 && y + c.height > r.y0)) continue;
+      ctx.drawImage(c, x, y);
+    }
+  }
+
+  /** Furniture tile an agent at (tx, ty) works on: one step ahead, or two for a second-row slot. */
+  private stationTile(tx: number, ty: number, dir: Direction): Vec2 | null {
+    const [dx, dy] = STEP[dir];
+    for (let k = 1; k <= 2; k++) {
+      const x = tx + dx * k;
+      const y = ty + dy * k;
+      if (this.layout.furniture.some((p) => x >= p.x && x < p.x + p.def.footprint.w && y >= p.y && y < p.y + p.def.footprint.d)) return { x, y };
+    }
+    return null;
+  }
+
+  /**
+   * Overlay: the object in front of each working agent comes alive (screen, books, rack LEDs, marker,
+   * coffee machine), so a lit-up object always means someone works there. Subtler than the beacons.
+   */
+  drawStationFx(ctx: CanvasRenderingContext2D, agents: Iterable<Agent>, t: number): void {
+    const pal = this.pal;
+    for (const a of agents) {
+      if (a.state !== "working" || !a.station) continue;
+      const tile = this.stationTile(Math.floor(a.x), Math.floor(a.y), a.dir);
+      if (!tile) continue;
+      const s = gridToScreen(a.x, a.y, this.origin);
+      const sx = Math.round(s.x);
+      const sy = Math.round(s.y);
+      const anim = a.sprites.anims[a.anim];
+      const frame = anim.frames[a.dir][frameAt(anim.spec, a.animTime)]!;
+      const { anchor } = a.sprites.size;
+      const seed = hash([...a.id].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 9973, 7));
+      // A w×h block of screen pixels at a tile-local world point, hidden where the agent stands in front of it.
+      const dot = (lx: number, ly: number, z: number, c: string, w = 1, h = 1) => {
+        const p = worldToScreen(tile.x * UNIT + lx, tile.y * UNIT + ly, z);
+        const x0 = Math.floor(this.origin.x + p.x);
+        const y0 = Math.floor(this.origin.y + p.y);
+        ctx.fillStyle = c;
+        for (let y = y0; y < y0 + h; y++) {
+          for (let x = x0; x < x0 + w; x++) if (!frame.opaque(x - sx + anchor.x, y - sy + anchor.y)) ctx.fillRect(x, y, 1, 1);
+        }
+      };
+      // n w×w pixels rising `rise` units from z0 over `period` s, thinning out at the top.
+      const rising = (n: number, lx: number, ly: number, z0: number, rise: number, period: number, c: string, w = 1) => {
+        for (let i = 0; i < n; i++) {
+          const k = (t / period + i / n + seed) % 1;
+          if (k > 0.75 && bayer(i, Math.floor(k * 8)) < (k - 0.75) * 4) continue; // thin out over the last quarter
+          dot(lx + i * 3 + Math.round(Math.sin(t * 3 + i * 2)), ly, z0 + Math.floor(k * rise), c, w, w);
+        }
+      };
+      switch (a.station) {
+        case "desk": {
+          // The whole monitor face (+y face at ly 6) flashes white with dark text, then dark with a white cursor.
+          const on = Math.floor(t * 3 + seed * 3) % 2 === 0;
+          for (let z = 20; z < 28; z++) {
+            const text = on && z % 3 === 1;
+            for (let lx = 2; lx < 14; lx++) dot(lx, 6, z, on ? (text && lx > 2 && lx < 4 + ((z * 5) % 8) ? pal.ink : pal.white) : z === 22 && lx < 4 ? pal.white : pal.ink);
+          }
+          rising(2, 5, 6, 30, 10, 1.1, pal.butter, 2);
+          break;
+        }
+        case "library": {
+          // An open white book with a butter glow, pulled out past the shelf edge; pages arc off it toward the reader.
+          const lift = Math.floor(t * 2 + seed * 2) % 2;
+          dot(9, 16, 37 + lift, pal.butter, 8, 6);
+          dot(9, 16, 36 + lift, pal.white, 6, 4);
+          dot(9, 16, 36 + lift, pal.ink, 1, 1);
+          dot(12, 16, 36 + lift, pal.ink, 1, 4); // the fold
+          for (let i = 0; i < 3; i++) {
+            const k = (t * 0.9 + i / 3 + seed) % 1;
+            dot(12 - k * 6, 17 + k * 6, 40 + Math.sin(k * Math.PI) * 10 - k * 8, pal.white, 2, 1);
+          }
+          break;
+        }
+        case "terminal": {
+          // A white 2 px progress bar filling up the rack face (+x face at lx 13), bits rising off the top.
+          const fill = 2 + Math.floor(((t / 1.2 + seed) % 1) * 24);
+          for (let z = 4; z < 4 + fill; z += 2) dot(13, 13, z + 1, pal.white, 2, 2);
+          rising(2, 7, 7, 48, 10, 0.9, pal.mint1);
+          break;
+        }
+        case "whiteboard": {
+          // A green marker (2×4, ink tip) drawing a thick wavy green stroke on the board (+x face at lx 6), then starting over.
+          // Along the board's top band, clear of the usage pies (board lz 9..19).
+          const n = Math.floor(((t / 2 + seed) % 1) * 13);
+          const wave = (i: number) => 39 + (i % 4 === 1 ? 1 : i % 4 === 3 ? -1 : 0);
+          for (let i = 0; i <= n; i++) dot(6, 2 + i, wave(i), pal.leaf1, 1, 2);
+          dot(8, 2 + n, wave(n) + 4, pal.leaf0, 2, 3);
+          dot(8, 2 + n, wave(n) + 1, pal.ink, 2, 1);
+          break;
+        }
+        case "coffee": {
+          // Thick steam rising high over the machine, and a cup in the agent's hand with its own wisps.
+          rising(4, 4, 6, 30, 24, 1.8, pal.white, 2);
+          const h = a.sprites.size.head;
+          // Held at the side so it sticks out past the body: white mug, dark coffee in the rim.
+          const cx = sx + (a.mini ? 4 : 7);
+          const cy = sy + Math.round(h.y * 0.55);
+          ctx.fillStyle = pal.white;
+          ctx.fillRect(cx, cy, 3, 3);
+          ctx.fillStyle = pal.ink;
+          ctx.fillRect(cx + 1, cy, 1, 1);
+          ctx.fillStyle = pal.cream;
+          for (let i = 0; i < 2; i++) {
+            const k = (t * 0.8 + i * 0.5 + seed) % 1;
+            if (bayer(i, Math.floor(k * 8)) > 1.1 - k) continue;
+            ctx.fillRect(cx + i + Math.round(Math.sin(t * 3 + i)), cy - 2 - Math.floor(k * 5), 1, 1);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  private flagUp: { canvas: HTMLCanvasElement; x: number; y: number } | null | undefined;
+
+  /**
+   * Overlay: the mail truck on its lane (no road, no shadow), the mailbox redrawn with its flag up while it
+   * holds mail, and a little envelope in the hand of each agent carrying a letter.
+   */
+  drawMail(ctx: CanvasRenderingContext2D, office: Office, t: number): void {
+    const pal = this.pal;
+    const mail = office.mail;
+    if (mail.flagUp) {
+      if (this.flagUp === undefined) {
+        const box = this.layout.furniture.find((f) => f.def === MAILBOX);
+        const spr = renderCropped((p) => MAILBOX.draw(p, pal, 1), pal.ink);
+        const at = box && gridToScreen(box.x, box.y, this.origin);
+        this.flagUp = at ? { canvas: toCanvas(spr.bmp), x: Math.round(at.x - spr.origin.x), y: Math.round(at.y - spr.origin.y) } : null;
+      }
+      if (this.flagUp) ctx.drawImage(this.flagUp.canvas, this.flagUp.x, this.flagUp.y);
+    }
+    for (const a of office.agents.values()) {
+      if (a.carrying !== "letter") continue;
+      // Same hand as the coffee mug: held at the side so it sticks out past the body.
+      const s = gridToScreen(a.x, a.y, this.origin);
+      const cx = Math.round(s.x) + (a.mini ? 4 : 7);
+      const cy = Math.round(s.y) + Math.round(a.sprites.size.head.y * 0.55);
+      ctx.fillStyle = pal.ink;
+      ctx.fillRect(cx - 1, cy - 1, 6, 5);
+      ctx.fillStyle = pal.cream;
+      ctx.fillRect(cx, cy, 4, 3);
+      ctx.fillStyle = pal.ink;
+      ctx.fillRect(cx + 1, cy, 2, 1); // flap
+    }
+    const truck = mail.truck;
+    if (truck.state === "away") return;
+    const s = gridToScreen(truck.x, this.layout.truckLane.y, this.origin);
+    const moving = truck.state !== "stopped";
+    ctx.drawImage(toCanvas(truckSprite(truck.facing, moving ? Math.floor(t * 12) : 0)), Math.round(s.x) - TRUCK_ANCHOR.x, Math.round(s.y) - TRUCK_ANCHOR.y);
+  }
+
+  /** Full-size "!" or "?" bubble with a 1 px frame in the beacon colour, cached. */
+  private bigBubble(ask: boolean, color: string): HTMLCanvasElement {
+    const key = `${ask}|${color}`;
+    let c = this.bigBubbles.get(key);
+    if (!c) {
+      const inner = new Bitmap(7, 11);
+      (ask ? drawAskBubble : drawAlertBubble)(inner, 3, 10, "full");
+      const bmp = new Bitmap(9, 13);
+      bmp.blit(inner, 1, 1);
+      for (let y = 0; y < 13; y++) {
+        for (let x = 0; x < 9; x++) {
+          if (!bmp.opaque(x, y) && (inner.opaque(x - 1, y - 1) || inner.opaque(x - 2, y - 1) || inner.opaque(x, y - 1) || inner.opaque(x - 1, y - 2) || inner.opaque(x - 1, y))) bmp.set(x, y, color);
+        }
+      }
+      c = toCanvas(bmp);
+      this.bigBubbles.set(key, c);
+    }
+    return c;
   }
 }

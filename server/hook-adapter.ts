@@ -1,4 +1,5 @@
 import { parseEvent, type AgentEvent } from "../shared/events";
+import { mailForTool } from "../shared/toolMapping";
 
 /**
  * Converts raw Claude Code hook payloads (stdin JSON of a hook, forwarded with curl) into AgentEvents.
@@ -8,9 +9,10 @@ import { parseEvent, type AgentEvent } from "../shared/events";
  * | SessionStart      | agent_spawn (session agent)                                            |
  * | UserPromptSubmit  | agent_spawn if the session is new                                      |
  * | PreToolUse        | agent_tool; for Task/Agent also agent_spawn of a sub-agent             |
+ * |                   | AskUserQuestion / ExitPlanMode → agent_waiting need input (no agent_tool) |
  * | PostToolUse(…)    | resumes work after a permission prompt; Task/Agent: closes sub-agent   |
  * | PermissionRequest | agent_waiting ("!" bubble)                                             |
- * | Notification      | agent_waiting; idle_prompt → need "input" ("?" bubble), else "!"       |
+ * | Notification      | agent_waiting; idle_prompt → need "next_prompt" ("?"), else "!"       |
  * | Stop, StopFailure | agent_done                                                             |
  * | SubagentStart     | binds the sub-agent's `agent_id` (spawns one if no Task call announced it) |
  * | SubagentStop      | agent_done + agent_despawn of that sub-agent (by agent_id, else latest)|
@@ -36,6 +38,8 @@ export interface HookPayload {
 }
 
 const SUBAGENT_TOOLS = new Set(["Task", "Agent"]);
+/** Tools that block on the user: shown as a real question, resumed by their PostToolUse. */
+const QUESTION_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 interface Session {
   /** Sub-agents currently alive: screen id, the Task call that announced it, the hook agent_id once known. */
@@ -43,6 +47,12 @@ interface Session {
   count: number;
   /** Agents showing a "!" bubble, resumed by their next PostToolUse. */
   waiting: Set<string>;
+  /** Actors with an AskUserQuestion / ExitPlanMode pending: later permission pings stay "input". */
+  asking: Set<string>;
+  cwd?: string;
+  /** Actor of the latest payload (session or sub-agent): who a git push/pull is credited to. */
+  lastActor: string;
+  lastSeen: number;
 }
 
 export function summarize(input: Record<string, unknown> | undefined): string | undefined {
@@ -60,6 +70,27 @@ export function summarize(input: Record<string, unknown> | undefined): string | 
 export class HookAdapter {
   private sessions = new Map<string, Session>();
 
+  constructor(private now: () => number = Date.now) {}
+
+  /**
+   * Credits a git push/pull in `repo` to the session working there: a session in the repo (or below it) before one in a
+   * parent folder, then the closest cwd, then the most recently seen.
+   */
+  git(repo: string, direction: "push" | "pull"): AgentEvent[] {
+    const r = repo.replace(/\/+$/, "");
+    let best: Session | undefined;
+    let bestRank = Infinity;
+    for (const s of this.sessions.values()) {
+      const c = s.cwd?.replace(/\/+$/, "");
+      const inside = !!c && (c === r || c.startsWith(`${r}/`));
+      if (!c || !(inside || r.startsWith(`${c}/`))) continue;
+      // Parent folders rank after every session inside the repo; within a group, a smaller gap wins (0 = exactly the repo).
+      const rank = (inside ? 0 : 1e9) + Math.abs(c.length - r.length);
+      if (rank < bestRank || (rank === bestRank && s.lastSeen >= best!.lastSeen)) [best, bestRank] = [s, rank];
+    }
+    return best ? [{ type: "agent_mail", agentId: best.lastActor, direction }] : [];
+  }
+
   handle(raw: unknown): AgentEvent[] {
     const direct = parseEvent(raw);
     if (direct) return [direct];
@@ -69,6 +100,9 @@ export class HookAdapter {
     const out: AgentEvent[] = [];
     const session = this.ensure(main, p, out);
     const actor = (p.agent_id && session.open.find((s) => s.agentId === p.agent_id)?.id) || main;
+    if (p.cwd) session.cwd = p.cwd;
+    session.lastActor = actor;
+    session.lastSeen = this.now();
 
     switch (p.hook_event_name) {
       case "SessionStart":
@@ -79,6 +113,12 @@ export class HookAdapter {
         break;
       case "PreToolUse": {
         if (!p.tool_name) break;
+        if (QUESTION_TOOLS.has(p.tool_name)) {
+          session.waiting.add(actor);
+          session.asking.add(actor);
+          out.push({ type: "agent_waiting", agentId: actor, need: "input", reason: summarize(p.tool_input) });
+          break;
+        }
         out.push({ type: "agent_tool", agentId: actor, tool: p.tool_name, summary: summarize(p.tool_input) });
         if (SUBAGENT_TOOLS.has(p.tool_name)) {
           const childId = `${main}/${p.tool_use_id ?? `sub-${++session.count}`}`;
@@ -90,6 +130,11 @@ export class HookAdapter {
       }
       case "PostToolUse":
       case "PostToolUseFailure":
+        if (p.hook_event_name === "PostToolUse" && p.tool_name) {
+          const dir = mailForTool(p.tool_name);
+          if (dir) out.push({ type: "agent_mail", agentId: actor, direction: dir });
+        }
+        if (p.tool_name && QUESTION_TOOLS.has(p.tool_name)) session.asking.delete(actor);
         if (session.waiting.delete(actor) && p.tool_name) out.push({ type: "agent_tool", agentId: actor, tool: p.tool_name, summary: summarize(p.tool_input) });
         if (p.tool_name && SUBAGENT_TOOLS.has(p.tool_name)) {
           const i = session.open.findIndex((s) => s.toolUseId && s.toolUseId === p.tool_use_id);
@@ -115,11 +160,13 @@ export class HookAdapter {
       case "PermissionRequest":
       case "Notification":
         session.waiting.add(actor);
-        out.push({ type: "agent_waiting", agentId: actor, reason: p.message?.slice(0, 200), ...(p.notification_type === "idle_prompt" ? { need: "input" as const } : {}) });
+        const need = p.notification_type === "idle_prompt" ? ("next_prompt" as const) : session.asking.has(actor) ? ("input" as const) : undefined;
+        out.push({ type: "agent_waiting", agentId: actor, reason: p.message?.slice(0, 200), ...(need ? { need } : {}) });
         break;
       case "Stop":
       case "StopFailure":
         session.waiting.delete(main);
+        session.asking.delete(main);
         out.push({ type: "agent_done", agentId: main });
         break;
       case "SessionEnd":
@@ -127,13 +174,15 @@ export class HookAdapter {
         this.sessions.delete(main);
         break;
     }
+    // A closed sub-agent can no longer receive mail credit.
+    if (session.lastActor !== main && !session.open.some((s) => s.id === session.lastActor)) session.lastActor = main;
     return out;
   }
 
   private ensure(main: string, p: HookPayload, out: AgentEvent[]): Session {
     let s = this.sessions.get(main);
     if (!s) {
-      s = { open: [], count: 0, waiting: new Set() };
+      s = { open: [], count: 0, waiting: new Set(), asking: new Set(), lastActor: main, lastSeen: this.now() };
       this.sessions.set(main, s);
       if (p.hook_event_name !== "SessionEnd") {
         out.push({ type: "agent_spawn", agentId: main, kind: p.agent_kind ?? "claude", label: p.cwd?.split("/").pop() });

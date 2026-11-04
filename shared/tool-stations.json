@@ -13,17 +13,17 @@
     "Bash": "terminal",
     "BashOutput": "terminal",
     "KillShell": "terminal",
-    "Task": "whiteboard",
-    "Agent": "whiteboard",
+    "Task": "coffee",
+    "Agent": "coffee",
     "TodoWrite": "whiteboard",
-    "ExitPlanMode": "whiteboard",
-    "WebFetch": "window",
-    "WebSearch": "window",
+    "WebFetch": "library",
+    "WebSearch": "library",
     "SendMessage": "mailbox"
   },
   "prefixes": {
-    "mcp__": "window"
+    "mcp__": "library"
   },
+  "mail": { "push": ["__push_files", "__create_or_update_file", "__delete_file"], "pull": [] },
   "animations": {
     "desk": "work_type",
     "library": "work_read",
@@ -31,6 +31,7 @@
     "whiteboard": "work_type",
     "window": "work_read",
     "mailbox": "work_read",
-    "cafe": "idle"
+    "cafe": "idle",
+    "coffee": "idle"
   }
 }

@@ -1,4 +1,4 @@
-import type { AgentEvent } from "../shared/events";
+import type { AgentEvent, Usage } from "../shared/events";
 import { SCENE_WARM } from "./art/palette";
 import { createRegistry } from "./characters";
 import { toCanvas } from "./engine/canvas";
@@ -9,6 +9,7 @@ import { Ambient } from "./scene/ambient";
 import { Camera, viewportFor } from "./scene/camera";
 import { WorldView } from "./scene/compose";
 import { Office } from "./scene/office";
+import { drawUsagePies } from "./scene/usagePies";
 import { OFFICE } from "./world/layout";
 import { renderBackground, VIEW_H, VIEW_W, worldContentRows } from "./world/roomRender";
 
@@ -77,9 +78,11 @@ const freezeAt = params.has("freeze") ? Number(params.get("freeze")) : Infinity;
 let simTime = 0;
 const frozen = () => simTime >= freezeAt;
 
+let usage: Usage | null = null;
 const sink: EventSink = {
   event: (e) => frozen() || office.apply(e),
   snapshot: (s) => frozen() || office.applySnapshot(s),
+  usage: (u) => frozen() || (usage = u),
 };
 const mock = params.get("mock");
 if (mock) startMock(mock === "1" ? "scripted" : mock, sink, params);
@@ -114,11 +117,15 @@ const loop = startLoop((rawDt) => {
   ctx.setTransform(1, 0, 0, 1, -Math.round(camera.x), -Math.round(camera.y));
   view.draw(ctx, t, office.actors(), (c) => {
     ambient.draw(c, t);
+    drawUsagePies(c, usage, OFFICE, view.origin, pal, Date.now() / 1000);
     ambient.drawLinks(c, office.links(), t);
     ambient.drawSleepy(c, office.agents.values(), t);
+    ambient.drawStationFx(c, office.agents.values(), t);
+    ambient.drawMail(c, office, t);
     ambient.drawSpeech(c, office.speeches(), office.agents);
-  });
+    ambient.drawBeacons(c, office.agents.values(), t);
+  }, (c) => ambient.drawBeaconRings(c, office.agents.values(), t));
 });
 
 // Hook for QA tooling (Playwright): live stats, viewport and the simulation.
-(window as unknown as { __agentOffice: unknown }).__agentOffice = { office, stats: loop.stats, apply: (e: AgentEvent) => office.apply(e), viewport: () => vp, camera, showUpdate };
+(window as unknown as { __agentOffice: unknown }).__agentOffice = { office, stats: loop.stats, apply: (e: AgentEvent) => office.apply(e), viewport: () => vp, view, camera, usage: () => usage, showUpdate };

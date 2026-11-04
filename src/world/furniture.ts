@@ -172,18 +172,9 @@ export const WHITEBOARD: FurnitureDef = {
       const ly = y - 2;
       const lz = z - 16;
       if (ly < 1 || ly > 27 || lz < 1 || lz > 24) return pal.wall2; // frame
-      // Sticky notes.
-      if (ly > 20 && ly < 25 && lz > 15 && lz < 21) return pal.butter;
-      if (ly > 21 && ly < 26 && lz > 7 && lz < 13) return pal.blush;
-      // A little flow chart: boxes and arrows.
-      const inBox = (y0: number, z0: number) => ly >= y0 && ly < y0 + 6 && lz >= z0 && lz < z0 + 4;
-      const onBorder = (y0: number, z0: number) =>
-        inBox(y0, z0) && (Math.floor(ly) === y0 || Math.floor(ly) === y0 + 5 || Math.floor(lz) === z0 || Math.floor(lz) === z0 + 3);
-      if (onBorder(3, 17) || onBorder(12, 17)) return pal.sky1;
-      if (onBorder(7, 6)) return pal.coral1;
-      if (Math.floor(lz) === 19 && ly > 9 && ly < 12) return pal.ink;
-      if (Math.floor(ly) === 10 && lz > 10 && lz < 17) return pal.ink;
-      if (Math.floor(lz) === 3 && ly > 3 && ly < 18 && Math.floor(ly) % 3 !== 0) return pal.red; // underline
+      // Sticky notes on the left edge (higher ly is further left); the usage pies are drawn live over the rest.
+      if (ly >= 24 && ly < 28 && lz > 15 && lz < 21) return pal.butter;
+      if (ly >= 24 && ly < 28 && lz > 7 && lz < 13) return pal.blush;
       return null;
     });
   },
@@ -193,19 +184,20 @@ export const MAILBOX: FurnitureDef = {
   id: "mailbox",
   name: "Boîte aux lettres",
   footprint: { w: 1, d: 1 },
-  frames: 2,
+  frames: 1,
   fps: 1,
   outline: true,
   draw(p, pal, f) {
     p.box(6, 6, 0, 3, 3, 12, { top: pal.wood2, left: pal.wood1, right: pal.wood0 });
     p.box(2, 3, 12, 11, 9, 8, { top: pal.red, left: pal.red, right: pal.coral0, edge: pal.blush });
     p.planeX(13.01, 5, 10, 15, 17, () => pal.ink); // slot
-    // Flag: up when there is mail (frame 1).
+    // The scene always draws frame 0 (flag down); the mail overlay redraws the whole box with frame 1 (flag up)
+    // while it holds mail. The lowered flag lies flat on the side so the raised version fully covers it.
     if (f === 1) {
       p.box(4, 12, 18, 1, 1, 8, { top: pal.wood1, left: pal.wood1, right: pal.wood0 });
       p.box(4, 12, 23, 1, 5, 3, { top: pal.butter, left: pal.butter, right: pal.coral1 });
     } else {
-      p.box(4, 12, 15, 1, 6, 1, { top: pal.butter, left: pal.butter, right: pal.coral1 });
+      p.box(4, 12, 15, 6, 1, 1, { top: pal.butter, left: pal.butter, right: pal.coral1 });
     }
   },
 };

@@ -2,7 +2,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { parseEvent, type AgentEvent } from "../shared/events";
+import { parseEvent, parseGitEvent, parseUsageUpdate, type AgentEvent, type Usage } from "../shared/events";
 import { play, randomScenario, scriptedScenario } from "../shared/scenario";
 import { HookAdapter } from "./hook-adapter";
 import { AgentTracker } from "./tracker";
@@ -20,15 +20,22 @@ const tracker = new AgentTracker();
 const adapter = new HookAdapter();
 const clients = new Set<WebSocket>();
 
+function broadcastRaw(msg: AgentEvent | Usage): void {
+  const data = JSON.stringify(msg);
+  for (const c of clients) if (c.readyState === c.OPEN) c.send(data);
+}
+
 function broadcast(e: AgentEvent): void {
   tracker.apply(e);
-  const data = JSON.stringify(e);
-  for (const c of clients) if (c.readyState === c.OPEN) c.send(data);
+  broadcastRaw(e);
 }
 
 // ── Demo ─────────────────────────────────────────────────────────────────────
 let stopDemo: (() => void) | null = null;
 if (DEMO) {
+  const now = Math.floor(Date.now() / 1000);
+  const demoUsage: Usage = { type: "usage", fiveHour: { usedPercentage: 62, resetsAt: now + 2 * 3600 }, sevenDay: { usedPercentage: 34, resetsAt: now + 3 * 86400 } };
+  tracker.usage = demoUsage;
   let n = 0;
   const stopA = play(() => scriptedScenario(`demo-${n++}`), broadcast, { loop: false });
   let stopB: (() => void) | undefined;
@@ -37,6 +44,10 @@ if (DEMO) {
     stopA();
     stopB?.();
     clearTimeout(t);
+    if (tracker.usage === demoUsage) {
+      tracker.usage = { type: "usage" };
+      broadcastRaw(tracker.usage);
+    }
     for (const id of tracker.ids()) if (id.startsWith("demo")) broadcast({ type: "agent_despawn", agentId: id });
     console.log("[agent-office] real events received → demo stopped");
   };
@@ -110,6 +121,43 @@ async function api(req: IncomingMessage, res: ServerResponse): Promise<boolean> 
     if (events.length) external();
     events.forEach(broadcast);
     json(res, 202, { accepted: events.length, events });
+    return true;
+  }
+  if (req.method === "POST" && url.pathname === "/git") {
+    let body: unknown;
+    try {
+      body = await readJson(req);
+    } catch {
+      json(res, 400, { error: "invalid JSON" });
+      return true;
+    }
+    const git = parseGitEvent(body);
+    if (!git) {
+      json(res, 400, { error: "invalid git event" });
+      return true;
+    }
+    const events = adapter.git(git.repo, git.direction);
+    if (events.length) external();
+    events.forEach(broadcast);
+    json(res, 202, { accepted: events.length, events });
+    return true;
+  }
+  if (req.method === "POST" && url.pathname === "/usage") {
+    let body: unknown;
+    try {
+      body = await readJson(req);
+    } catch {
+      json(res, 400, { error: "invalid JSON" });
+      return true;
+    }
+    const usage = parseUsageUpdate(body);
+    if (!usage) {
+      json(res, 400, { error: "invalid usage" });
+      return true;
+    }
+    tracker.usage = usage; // deliberately not external(): usage alone must not stop the demo
+    broadcastRaw(usage);
+    json(res, 202, { accepted: true });
     return true;
   }
   if (req.method === "GET" && url.pathname === "/health") {

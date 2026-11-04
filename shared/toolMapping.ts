@@ -9,6 +9,8 @@ export interface ToolStationConfig {
   prefixes: Record<string, string>;
   /** Station type → animation played while working there. */
   animations: Record<string, string>;
+  /** Tool-name suffixes that push to / pull from a remote without a local git command. */
+  mail: { push: string[]; pull: string[] };
 }
 
 export const DEFAULT_TOOL_CONFIG: ToolStationConfig = defaults;
@@ -22,4 +24,9 @@ export function stationForTool(tool: string, config: ToolStationConfig = DEFAULT
 
 export function animationForStation(station: string, config: ToolStationConfig = DEFAULT_TOOL_CONFIG): string {
   return config.animations[station] ?? "work_type";
+}
+
+export function mailForTool(tool: string, config: ToolStationConfig = DEFAULT_TOOL_CONFIG): "push" | "pull" | null {
+  for (const dir of ["push", "pull"] as const) if (config.mail[dir].some((s) => tool.endsWith(s))) return dir;
+  return null;
 }

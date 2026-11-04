@@ -9,7 +9,7 @@
   <img src="docs/screenshots/m3b-world-overview.png" alt="The Agent Office scene: an open space, a lab and a cafeteria at night" width="820">
 </p>
 
-Each Claude Code session, and each sub-agent it starts, walks to the workstation that matches the tool it is using: typing at a desk, reading in the lab, running commands at the servers. When it needs you, a bubble pops up above its head. When it's idle, it takes a coffee break or falls asleep.
+Each Claude Code session, and each sub-agent it starts, walks to the workstation that matches the tool it is using: typing at a desk, reading in the lab, running commands at the servers. When it needs you, a beacon lights up around it. When it's idle, it takes a coffee break or falls asleep.
 
 ## Contents
 
@@ -26,11 +26,13 @@ Each Claude Code session, and each sub-agent it starts, walks to the workstation
 
 | State | On screen |
 |---|---|
-| **Working** | At a workstation; the animation depends on the tool (typing, reading, terminal…) |
-| **Needs permission** | Red **!** bubble |
-| **Waiting for you** | Blue **?** bubble |
-| **Done** | A small victory jump with sparkles, then a coffee break |
+| **Working** | At the workstation that matches the tool, which lights up while it works (flashing monitor, glowing book, server progress bar, marker on the whiteboard) |
+| **Needs permission** | Red pulsing beam and floor ring, big red **!** |
+| **Waiting for you** | The same in blue with a **?**, for a real question or a plan to approve |
+| **Waiting on a sub-agent** | Takes a coffee at the cafeteria bar until the sub-agent reports back |
+| **Done** | A small victory jump with sparkles, then a coffee break, with a small **?** once Claude Code is waiting for the next prompt |
 | **Idle** | Wanders, chats, goes to the cafeteria, falls asleep after ~25 s |
+| **Push / pull** | A mail truck drives up; the agent posts or collects a letter |
 | **Sub-agent** | A mini version of its parent, with its own tint |
 
 A waiting agent goes back to work as soon as it uses a tool or you send a new prompt.
@@ -58,8 +60,24 @@ node scripts/claude-hooks.mjs install
 
 This adds hooks to `~/.claude/settings.json`: it merges with your existing hooks and saves a backup first. Every Claude Code session now shows up in the office, including those already open (from their next event). Undo with `node scripts/claude-hooks.mjs uninstall`.
 
+**3. Optional: mail truck on git push and pull**
+
+```bash
+node scripts/git-hooks.mjs install
+```
+
+A mail truck comes for the agent when a push or a pull happens in its repo. Needs git 2.54+. Undo with `node scripts/git-hooks.mjs uninstall`. Details in [Configuration](docs/configuration.md#git-hook-mail-truck).
+
+**4. Optional: show your usage on the whiteboard**
+
+```bash
+node scripts/statusline.mjs install
+```
+
+Two marker pies on the whiteboard show your 5-hour (left) and weekly (right) usage, red from 90 %. They stay empty until Claude Code reports usage, which only happens for Claude.ai Pro and Max subscribers. An existing status line keeps working, and `node scripts/statusline.mjs uninstall` restores it. Details in [Configuration](docs/configuration.md#status-line-usage-pies).
+
 > [!TIP]
-> <http://localhost:4317/gallery> shows every character, animation and piece of furniture.
+> <http://localhost:4317/gallery> shows every character, animation and piece of furniture. The mail truck and the mailbox's raised flag only appear in the office itself.
 
 ## Use it as a screen saver
 

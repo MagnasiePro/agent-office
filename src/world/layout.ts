@@ -15,7 +15,7 @@ import {
 } from "./furniture";
 
 /** Station types an agent can go to. Tools are mapped to these in shared/tool-stations.json. */
-export type StationType = "desk" | "library" | "terminal" | "whiteboard" | "window" | "cafe" | "mailbox";
+export type StationType = "desk" | "library" | "terminal" | "whiteboard" | "window" | "coffee" | "cafe" | "mailbox";
 
 export interface Placement {
   def: FurnitureDef;
@@ -89,6 +89,8 @@ export interface WorldLayout {
   lounge: { x: number; y: number };
   /** Where new session agents appear. */
   spawn: { x: number; y: number };
+  /** Grid line the mail truck drives along through the void (no road drawn): it appears at x = `from` and stops at x = `stop`. */
+  truckLane: { y: number; from: number; stop: number };
 }
 
 // ── Builder helpers ──────────────────────────────────────────────────────────
@@ -128,13 +130,14 @@ desk("desk-b3", "open", 6, 4);
 desk("desk-b4", "open", 8, 4);
 desk("desk-b5", "open", 10, 4);
 put(FLOOR_LAMP, 0, 4);
-put(MAILBOX, 0, 7);
 put(PLANT_SMALL, 13, 5);
+// The one mailbox, on the front edge of the open space where the mail truck stops.
+put(MAILBOX, 11, 8);
 station("window-open", "window", "open", [
   { x: 5, y: 1, dir: "NE" },
   { x: 6, y: 1, dir: "NE" },
 ]);
-station("mailbox", "mailbox", "open", [{ x: 1, y: 7, dir: "NW" }]);
+station("mailbox", "mailbox", "open", [{ x: 11, y: 7, dir: "SE" }]);
 
 // Lab: research & tooling.
 put(WHITEBOARD, 14, 2);
@@ -173,9 +176,12 @@ put(CAFE_TABLE, 6, 12);
 put(COUCH, 9, 13);
 put(FLOOR_LAMP, 9, 10);
 put(PLANT_BIG, 0, 16);
-station("cafe", "cafe", "cafe", [
+// Reserved for parents waiting on a sub-agent (no idle preference names "coffee").
+station("coffee-bar", "coffee", "cafe", [
   { x: 1, y: 10, dir: "NE" },
   { x: 2, y: 10, dir: "NE" },
+]);
+station("cafe", "cafe", "cafe", [
   { x: 2, y: 13, dir: "SE" },
   { x: 4, y: 13, dir: "NW" },
   { x: 3, y: 14, dir: "NE" },
@@ -186,8 +192,10 @@ station("cafe", "cafe", "cafe", [
   { x: 8, y: 14, dir: "SW" },
 ]);
 
+const W = 24;
+
 export const OFFICE: WorldLayout = {
-  w: 24,
+  w: W,
   d: 17,
   rooms: [
     { id: "open", name: "Open space", x: 0, y: 0, w: 14, d: 9, floor: "planks" },
@@ -217,6 +225,7 @@ export const OFFICE: WorldLayout = {
   stations,
   lounge: { x: 5, y: 14 },
   spawn: { x: 6, y: 7 },
+  truckLane: { y: 10.5, from: W + 5, stop: 11.9 },
 };
 
 export function isFloor(layout: WorldLayout, x: number, y: number): boolean {
