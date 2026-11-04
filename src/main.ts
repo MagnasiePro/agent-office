@@ -92,8 +92,9 @@ const loop = startLoop((rawDt) => {
     ambient.drawLinks(c, office.links(), t);
     ambient.drawSleepy(c, office.agents.values(), t);
     ambient.drawSpeech(c, office.speeches(), office.agents);
-  });
+    ambient.drawBeacons(c, office.agents.values(), t);
+  }, (c) => ambient.drawBeaconRings(c, office.agents.values(), t));
 });
 
 // Hook for QA tooling (Playwright): live stats, viewport and the simulation.
-(window as unknown as { __agentOffice: unknown }).__agentOffice = { office, stats: loop.stats, apply: (e: AgentEvent) => office.apply(e), viewport: () => vp, camera, usage: () => usage };
+(window as unknown as { __agentOffice: unknown }).__agentOffice = { office, stats: loop.stats, apply: (e: AgentEvent) => office.apply(e), viewport: () => vp, view, camera, usage: () => usage };

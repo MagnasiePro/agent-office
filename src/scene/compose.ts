@@ -104,7 +104,13 @@ export class WorldView {
     this.fixtures = fixtures(layout);
   }
 
-  draw(ctx: CanvasRenderingContext2D, time: number, actors: readonly Actor[], overlay?: (ctx: CanvasRenderingContext2D) => void): void {
+  draw(
+    ctx: CanvasRenderingContext2D,
+    time: number,
+    actors: readonly Actor[],
+    overlay?: (ctx: CanvasRenderingContext2D) => void,
+    underlay?: (ctx: CanvasRenderingContext2D) => void,
+  ): void {
     ctx.drawImage(this.staticLayer, 0, 0);
     const items: Drawable[] = [];
     for (const f of this.fixtures) {
@@ -119,6 +125,7 @@ export class WorldView {
       const { rx, ry } = a.sprites.size.shadow;
       ctx.drawImage(shadow(rx, ry, this.pal.ink), Math.round(s.x - rx), Math.round(s.y - ry));
     }
+    underlay?.(ctx);
     for (const a of actors) {
       const anim = a.sprites.anims[a.anim];
       const frame = anim.frames[a.dir][frameAt(anim.spec, a.elapsed)]!;

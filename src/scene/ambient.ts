@@ -1,9 +1,11 @@
 import type { ScenePalette } from "../art/palette";
-import { bayer } from "../engine/bitmap";
+import { bayer, Bitmap } from "../engine/bitmap";
 import { gridToScreen, worldToScreen, UNIT, type Vec2 } from "../engine/iso";
 import type { Agent } from "../engine/agent";
 import { toCanvas } from "../engine/canvas";
-import { speechBubble } from "../engine/emotes";
+import { drawAlertBubble, drawAskBubble, speechBubble } from "../engine/emotes";
+import { frameAt } from "../engine/sprite";
+import type { SizeClass } from "../characters/types";
 import type { Speech } from "./office";
 import type { WorldLayout } from "../world/layout";
 import { fairySag } from "../world/roomRender";
@@ -136,6 +138,119 @@ export class Ambient {
         const sag = Math.sin(k * Math.PI) * Math.min(10, len * 0.12);
         ctx.fillRect(Math.round(x0 + (x1 - x0) * k), Math.round(y0 + (y1 - y0) * k + sag), 1, 1);
       }
+    }
+  }
+
+  /** Red "!" (permission) or blue "?" (a real question) for agents blocked on the user, else null. */
+  private beacon(a: Agent): { main: string; glow: string; period: number; ask: boolean } | null {
+    if (a.state !== "waiting") return null;
+    const ask = a.anim === "waiting_input";
+    return ask ? { main: this.pal.sky1, glow: this.pal.sky2, period: 1.8, ask } : { main: this.pal.red, glow: this.pal.coral1, period: 1.0, ask };
+  }
+
+  /** 0..1..0 once per period. */
+  private static pulse(t: number, period: number): number {
+    return (1 - Math.cos(((t % period) / period) * Math.PI * 2)) / 2;
+  }
+
+  private ringCache = new Map<string, HTMLCanvasElement>();
+
+  /** Underlay: pulsing dithered ring on the floor around each waiting agent's feet. */
+  drawBeaconRings(ctx: CanvasRenderingContext2D, agents: Iterable<Agent>, t: number): void {
+    for (const a of agents) {
+      const b = this.beacon(a);
+      if (!b) continue;
+      const grow = Math.round(Ambient.pulse(t, b.period) * 3);
+      const { rx: srx, ry: sry } = a.sprites.size.shadow;
+      const rx = srx + 4 + grow;
+      const ry = sry + 2 + Math.ceil(grow / 2);
+      const key = `${rx}|${ry}|${grow}|${b.main}`;
+      let c = this.ringCache.get(key);
+      if (!c) {
+        const bmp = new Bitmap(rx * 2 + 1, ry * 2 + 1);
+        const inEllipse = (x: number, y: number, ex: number, ey: number) => ((x - rx) / (ex + 0.5)) ** 2 + ((y - ry) / (ey + 0.5)) ** 2 <= 1;
+        // The ring thins out as it expands, like a ripple.
+        const density = 1 - grow * 0.17;
+        for (let y = 0; y <= ry * 2; y++) {
+          for (let x = 0; x <= rx * 2; x++) {
+            if (!inEllipse(x, y, rx, ry)) continue;
+            if (!inEllipse(x, y, rx - 2, ry - 1)) {
+              if (bayer(x, y) < density) bmp.set(x, y, b.main);
+            } else if (bayer(x, y) < 0.25) bmp.set(x, y, b.glow);
+          }
+        }
+        c = toCanvas(bmp);
+        this.ringCache.set(key, c);
+      }
+      const s = gridToScreen(a.x, a.y, this.origin);
+      ctx.drawImage(c, Math.round(s.x) - rx, Math.round(s.y) - ry);
+    }
+  }
+
+  /** Beam canvases per agent frame (the beam skips the agent's own pixels so it reads as behind them). */
+  private beamCache = new WeakMap<Bitmap, Map<string, HTMLCanvasElement>>();
+  private bigBubbles = new Map<boolean, HTMLCanvasElement>();
+  private askBubbles = new Map<SizeClass, HTMLCanvasElement>();
+
+  /**
+   * Overlay: light beam rising from each waiting agent with a big bobbing "!" or "?" above the head,
+   * plus the small "?" over finished sessions that wait for their next prompt.
+   */
+  drawBeacons(ctx: CanvasRenderingContext2D, agents: Iterable<Agent>, t: number): void {
+    for (const a of agents) {
+      const s = gridToScreen(a.x, a.y, this.origin);
+      const sx = Math.round(s.x);
+      const sy = Math.round(s.y);
+      const h = a.sprites.size.head;
+      const b = this.beacon(a);
+      if (!b) {
+        if (!a.awaitingPrompt || a.state === "despawning" || a.state === "gone") continue;
+        const size = a.sprites.variant.size;
+        let c = this.askBubbles.get(size);
+        if (!c) {
+          const bmp = new Bitmap(7, 11);
+          drawAskBubble(bmp, 3, 10, size);
+          c = toCanvas(bmp);
+          this.askBubbles.set(size, c);
+        }
+        ctx.drawImage(c, sx + h.x + 3, sy + h.y - 12); // tail just above the head, as the sprite drew it
+        continue;
+      }
+      const k = Ambient.pulse(t, b.period);
+      const level = 2 + Math.round(k * 2); // 2..4 quarters of full density
+      const anim = a.sprites.anims[a.anim];
+      const frame = anim.frames[a.dir][frameAt(anim.spec, a.animTime)]!;
+      const { anchor, shadow } = a.sprites.size;
+      const hw = shadow.rx + 2;
+      const H = a.mini ? 34 : 48;
+      let byFrame = this.beamCache.get(frame);
+      if (!byFrame) this.beamCache.set(frame, (byFrame = new Map()));
+      const key = `${level}|${b.main}|${hw}|${H}`;
+      let beam = byFrame.get(key);
+      if (!beam) {
+        const bmp = new Bitmap(hw * 2 + 1, H);
+        for (let y = 0; y < H; y++) {
+          const fade = Math.sqrt((y + 1) / H) * (level / 4); // 0 at the top, full at the feet
+          for (let x = 0; x <= hw * 2; x++) {
+            // Beam pixel in frame coordinates: the beam's bottom-centre sits on the anchor.
+            if (frame.opaque(x - hw + anchor.x, y - H + 1 + anchor.y)) continue;
+            const edge = x <= 1 || x >= hw * 2 - 1;
+            if (bayer(x, y) < (edge ? 1 : 0.45) * fade) bmp.set(x, y, edge ? b.main : b.glow);
+          }
+        }
+        beam = toCanvas(bmp);
+        byFrame.set(key, beam);
+      }
+      ctx.drawImage(beam, sx - hw, sy - H + 1);
+      let bubble = this.bigBubbles.get(b.ask);
+      if (!bubble) {
+        const bmp = new Bitmap(7, 11);
+        (b.ask ? drawAskBubble : drawAlertBubble)(bmp, 3, 10, "full");
+        bubble = toCanvas(bmp);
+        this.bigBubbles.set(b.ask, bubble);
+      }
+      const bob = Math.round(k * 2);
+      ctx.drawImage(bubble, sx + h.x - bubble.width, sy + h.y - 26 - bob, bubble.width * 2, bubble.height * 2);
     }
   }
 }
