@@ -48,7 +48,7 @@ const REST: Pose = {
 /** Default animation timings — characters may reuse them as-is. */
 export const STANDARD_ANIMATIONS: Record<Exclude<AnimName, "spawn" | "despawn">, AnimSpec> = {
   idle: { frames: 8, fps: 4, loop: true },
-  walk: { frames: 4, fps: 8, loop: true },
+  walk: { frames: 4, fps: 12, loop: true },
   work_type: { frames: 4, fps: 8, loop: true },
   work_read: { frames: 4, fps: 3, loop: true },
   work_terminal: { frames: 4, fps: 12, loop: true },
