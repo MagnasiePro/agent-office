@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -110,6 +110,31 @@ describe("git hooks", () => {
     await expect(git(a, "push", "-q")).rejects.toThrow();
     await sleep(1500);
     expect(bodies).toEqual([]);
+  });
+
+  it("pushing two branches at once sends one push", async () => {
+    await hooks("install", String(port));
+    await git(a, "branch", "x");
+    await commit(a, "second");
+    await git(a, "push", "-q", "origin", "main", "x");
+    await waitBodies(1);
+    await sleep(1000);
+    expect(bodies).toEqual([{ repo: await toplevel(a), direction: "push" }]);
+    expect(readdirSync(env.TMPDIR!).filter((f) => f.startsWith("agent-office-push-"))).toEqual([]);
+  });
+
+  it("a fetch after a rejected push sends pull, not push", async () => {
+    await hooks("install", String(port));
+    await commit(b, "ahead");
+    await git(b, "push", "-q");
+    await waitBodies(1);
+    bodies.length = 0;
+    await commit(a, "behind");
+    await expect(git(a, "push", "-q")).rejects.toThrow();
+    await git(a, "fetch", "-q");
+    await waitBodies(1);
+    await sleep(300);
+    expect(bodies).toEqual([{ repo: await toplevel(a), direction: "pull" }]);
   });
 
   it("a repo pre-push that fails still aborts the push and sends nothing", async () => {
