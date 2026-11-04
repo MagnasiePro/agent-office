@@ -187,12 +187,18 @@ export const MAILBOX: FurnitureDef = {
   frames: 1,
   fps: 1,
   outline: true,
-  draw(p, pal) {
+  draw(p, pal, f) {
     p.box(6, 6, 0, 3, 3, 12, { top: pal.wood2, left: pal.wood1, right: pal.wood0 });
     p.box(2, 3, 12, 11, 9, 8, { top: pal.red, left: pal.red, right: pal.coral0, edge: pal.blush });
     p.planeX(13.01, 5, 10, 15, 17, () => pal.ink); // slot
-    // Flag down; the overlay draws it up while the mailbox holds mail.
-    p.box(4, 12, 15, 1, 6, 1, { top: pal.butter, left: pal.butter, right: pal.coral1 });
+    // The scene always draws frame 0 (flag down); the mail overlay redraws the whole box with frame 1 (flag up)
+    // while it holds mail. The lowered flag lies flat on the side so the raised version fully covers it.
+    if (f === 1) {
+      p.box(4, 12, 18, 1, 1, 8, { top: pal.wood1, left: pal.wood1, right: pal.wood0 });
+      p.box(4, 12, 23, 1, 5, 3, { top: pal.butter, left: pal.butter, right: pal.coral1 });
+    } else {
+      p.box(4, 12, 15, 6, 1, 1, { top: pal.butter, left: pal.butter, right: pal.coral1 });
+    }
   },
 };
 

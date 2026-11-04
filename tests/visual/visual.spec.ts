@@ -200,3 +200,50 @@ test.describe("depth sorting stability", () => {
     expect(Buffer.compare(a, b)).toBe(0);
   });
 });
+
+test.describe("mail truck", () => {
+  test.use({ viewport: { width: 1920, height: 1080 } });
+  test("the mail truck drives up to the mailbox", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto("/?ws=ws://localhost:1/none");
+    await ready(page);
+    const apply = (e: unknown) => page.evaluate((ev) => (window as unknown as { __agentOffice: Office }).__agentOffice.apply(ev), e);
+    await apply({ type: "agent_spawn", agentId: "a", kind: "claude" });
+    await page.waitForTimeout(1500);
+    await apply({ type: "agent_tool", agentId: "a", tool: "Edit", summary: "" });
+    await page.waitForFunction(() => (window as unknown as { __agentOffice: Office }).__agentOffice.office.agents.get("a")?.state === "working", null, { timeout: 20_000 });
+    await apply({ type: "agent_mail", agentId: "a", direction: "pull" });
+    type Mail = { truck: { x: number; state: string }; flagUp: boolean };
+    await page.waitForFunction(() => (window as unknown as { __agentOffice: { office: { mail: Mail } } }).__agentOffice.office.mail.truck.state === "stopped" && (window as unknown as { __agentOffice: { office: { mail: Mail } } }).__agentOffice.office.mail.flagUp, null, { timeout: 20_000 });
+    const w = await page.evaluate(() => {
+      const o = (window as unknown as { __agentOffice: Office & { office: { mail: Mail } } }).__agentOffice;
+      return { truck: o.office.mail.truck, flagUp: o.office.mail.flagUp, origin: o.view.origin, cam: { x: Math.round(o.camera.x), y: Math.round(o.camera.y) }, scale: o.viewport().scale };
+    });
+    const png = decode(await page.screenshot());
+    // Counts canvas pixels of one colour inside a box in world screen space (before scale).
+    const count = (x0: number, y0: number, x1: number, y1: number, color: string) => {
+      let n = 0;
+      for (let y = Math.round(y0); y < y1; y++) {
+        for (let x = Math.round(x0); x < x1; x++) {
+          const px = (x - w.cam.x) * w.scale;
+          const py = (y - w.cam.y) * w.scale;
+          if (px < 0 || py < 0 || px >= png.width || py >= png.height) continue;
+          const o = (py * png.width + px) * 4;
+          const hex = `#${[png.data[o]!, png.data[o + 1]!, png.data[o + 2]!].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+          if (hex === color) n++;
+        }
+      }
+      return n;
+    };
+    // Left of the mailbox (its red box starts 15 px right of the stopped truck), so only the truck counts.
+    const t = gridToScreen(w.truck.x, 10.5, w.origin);
+    expect(w.truck.state).toBe("stopped");
+    expect(w.flagUp).toBe(true);
+    expect(count(t.x - 22, t.y - 36, t.x + 14, t.y + 10, SCENE_WARM.red), "red truck at its stop").toBeGreaterThanOrEqual(20);
+    // The raised flag stands above the mailbox (11, 8), higher than the flag-down sprite reaches.
+    const m = gridToScreen(11.5, 8.5, w.origin);
+    expect(count(m.x - 16, m.y - 30, m.x, m.y - 20, SCENE_WARM.butter), "raised butter flag").toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+  });
+});

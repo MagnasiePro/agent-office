@@ -6,7 +6,10 @@ import { toCanvas } from "../engine/canvas";
 import { drawAlertBubble, drawAskBubble, speechBubble } from "../engine/emotes";
 import { frameAt } from "../engine/sprite";
 import type { Direction, SizeClass } from "../characters/types";
-import type { Speech } from "./office";
+import type { Office, Speech } from "./office";
+import { TRUCK_ANCHOR, truckSprite } from "./truck";
+import { MAILBOX } from "../world/furniture";
+import { renderCropped } from "../engine/isoPaint";
 import type { WorldLayout } from "../world/layout";
 import { fairySag } from "../world/roomRender";
 
@@ -380,6 +383,44 @@ export class Ambient {
         }
       }
     }
+  }
+
+  private flagUp: { canvas: HTMLCanvasElement; x: number; y: number } | null | undefined;
+
+  /**
+   * Overlay: the mail truck on its lane (no road, no shadow), the mailbox redrawn with its flag up while it
+   * holds mail, and a little envelope in the hand of each agent carrying a letter.
+   */
+  drawMail(ctx: CanvasRenderingContext2D, office: Office, t: number): void {
+    const pal = this.pal;
+    const mail = office.mail;
+    if (mail.flagUp) {
+      if (this.flagUp === undefined) {
+        const box = this.layout.furniture.find((f) => f.def === MAILBOX);
+        const spr = renderCropped((p) => MAILBOX.draw(p, pal, 1), pal.ink);
+        const at = box && gridToScreen(box.x, box.y, this.origin);
+        this.flagUp = at ? { canvas: toCanvas(spr.bmp), x: Math.round(at.x - spr.origin.x), y: Math.round(at.y - spr.origin.y) } : null;
+      }
+      if (this.flagUp) ctx.drawImage(this.flagUp.canvas, this.flagUp.x, this.flagUp.y);
+    }
+    for (const a of office.agents.values()) {
+      if (a.carrying !== "letter") continue;
+      // Same hand as the coffee mug: held at the side so it sticks out past the body.
+      const s = gridToScreen(a.x, a.y, this.origin);
+      const cx = Math.round(s.x) + (a.mini ? 4 : 7);
+      const cy = Math.round(s.y) + Math.round(a.sprites.size.head.y * 0.55);
+      ctx.fillStyle = pal.ink;
+      ctx.fillRect(cx - 1, cy - 1, 6, 5);
+      ctx.fillStyle = pal.cream;
+      ctx.fillRect(cx, cy, 4, 3);
+      ctx.fillStyle = pal.ink;
+      ctx.fillRect(cx + 1, cy, 2, 1); // flap
+    }
+    const truck = mail.truck;
+    if (truck.state === "away") return;
+    const s = gridToScreen(truck.x, this.layout.truckLane.y, this.origin);
+    const moving = truck.state !== "stopped";
+    ctx.drawImage(toCanvas(truckSprite(truck.facing, moving ? Math.floor(t * 12) : 0)), Math.round(s.x) - TRUCK_ANCHOR.x, Math.round(s.y) - TRUCK_ANCHOR.y);
   }
 
   /** Full-size "!" or "?" bubble with a 1 px frame in the beacon colour, cached. */
