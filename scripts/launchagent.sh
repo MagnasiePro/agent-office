@@ -6,6 +6,7 @@
 #   scripts/launchagent.sh status
 # Options via env: PORT (default 4317), DEMO (default 1 = demo until real events arrive),
 # UPDATE_CHECK (default 1 = daily look for a new release; 0 = off).
+# USAGE_POLL (default 0; 1 = poll Claude usage for the whiteboard pies, see docs/configuration.md).
 set -euo pipefail
 
 LABEL="com.agent-office.server"
@@ -15,6 +16,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PORT:-4317}"
 DEMO="${DEMO:-1}"
 UPDATE_CHECK="${UPDATE_CHECK:-1}"
+USAGE_POLL="${USAGE_POLL:-0}"
 DOMAIN="gui/$(id -u)"
 
 case "${1:-}" in
@@ -43,6 +45,7 @@ case "${1:-}" in
     <key>PORT</key><string>$PORT</string>
     <key>DEMO</key><string>$DEMO</string>
     <key>UPDATE_CHECK</key><string>$UPDATE_CHECK</string>
+    <key>USAGE_POLL</key><string>$USAGE_POLL</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
