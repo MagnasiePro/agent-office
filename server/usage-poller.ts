@@ -42,11 +42,18 @@ async function readStore(): Promise<Store | undefined> {
     if (!acct) return undefined;
     return {
       json,
-      // Through stdin and hex (-X) so the secret never shows in the process list or needs quoting.
+      // Hex (-X) needs no quoting. Like Claude Code: through `security -i` stdin, which keeps the secret out of the
+      // process list but truncates lines near 4 KB, else as an argument.
       write: async (j) => {
+        const hex = Buffer.from(j).toString("hex");
+        const line = `add-generic-password -U -s "${SERVICE}" -a "${acct.replace(/"/g, "")}" -X ${hex}\n`;
+        if (line.length >= 4000) {
+          await run("security", ["add-generic-password", "-U", "-s", SERVICE, "-a", acct, "-X", hex]);
+          return;
+        }
         const child = execFile("security", ["-i"]);
         const done = new Promise<void>((ok, ko) => child.on("close", (c) => (c === 0 ? ok() : ko(new Error(`security exited ${c}`)))));
-        child.stdin!.end(`add-generic-password -U -s "${SERVICE}" -a "${acct.replace(/"/g, "")}" -X ${Buffer.from(j).toString("hex")}\n`);
+        child.stdin!.end(line);
         await done;
       },
     };
